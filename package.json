@@ -1,0 +1,57 @@
+{
+    "name": "goravel-vite-plugin",
+    "version": "0.1.0",
+    "description": "Vite plugin for Goravel applications.",
+    "type": "module",
+    "keywords": [
+        "goravel",
+        "go",
+        "vite",
+        "vite-plugin"
+    ],
+    "license": "MIT",
+    "author": "Goravel",
+    "homepage": "https://github.com/protibimbok/goravel-vite-plugin#readme",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/protibimbok/goravel-vite-plugin.git"
+    },
+    "bugs": {
+        "url": "https://github.com/protibimbok/goravel-vite-plugin/issues"
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        "./package.json": "./package.json",
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist/**/*"
+    ],
+    "engines": {
+        "node": "^20.19.0 || >=22.12.0"
+    },
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "dev": "tsc -p tsconfig.json --watch",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "test": "npm run build && node --test \"tests/**/*.test.mjs\"",
+        "prepublishOnly": "npm run test"
+    },
+    "devDependencies": {
+        "@types/node": "^22.18.1",
+        "typescript": "^5.9.2",
+        "vite": "^8.0.0"
+    },
+    "peerDependencies": {
+        "vite": "^7.0.0 || ^8.0.0"
+    },
+    "dependencies": {
+        "picocolors": "^1.1.1",
+        "tinyglobby": "^0.2.14",
+        "vite-plugin-full-reload": "^1.2.0"
+    }
+}
