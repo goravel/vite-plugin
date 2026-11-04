@@ -1,5 +1,9 @@
 # goravel-vite-plugin
 
+[![npm version](https://img.shields.io/npm/v/goravel-vite-plugin.svg)](https://www.npmjs.com/package/goravel-vite-plugin)
+[![tests](https://github.com/goravel/vite-plugin/actions/workflows/tests.yml/badge.svg)](https://github.com/goravel/vite-plugin/actions/workflows/tests.yml)
+[![license](https://img.shields.io/npm/l/goravel-vite-plugin.svg)](LICENSE)
+
 Vite plugin for [Goravel](https://www.goravel.dev) applications. It is the counterpart of the framework's `vite` template function: the plugin builds your assets where the framework looks for them, and while the dev server runs it tells the framework where to find it.
 
 - `vite build` writes to `public/build` with a `.vite/manifest.json` the framework resolves entry points through.
@@ -152,6 +156,16 @@ pnpm test
 ```
 
 The tests run a real Vite build and dev server in a temporary directory. Node stands in for Go, so no Go toolchain is needed to run them.
+
+### Releasing
+
+1. Bump `version` in `package.json` and move the `Unreleased` entries in [CHANGELOG.md](CHANGELOG.md) under the new version.
+2. Commit, tag `vX.Y.Z` and push the tag.
+3. Publish a GitHub release for the tag. The `release` workflow runs the tests and publishes to npm with provenance; it needs an `NPM_TOKEN` repository secret.
+
+## Contributing
+
+Issues and pull requests are welcome at [goravel/vite-plugin](https://github.com/goravel/vite-plugin). The framework side of this integration lives in [goravel/framework](https://github.com/goravel/framework).
 
 ## License
 

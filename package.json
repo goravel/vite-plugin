@@ -6,18 +6,21 @@
     "keywords": [
         "goravel",
         "go",
+        "golang",
         "vite",
-        "vite-plugin"
+        "vite-plugin",
+        "hmr",
+        "assets"
     ],
     "license": "MIT",
     "author": "Goravel",
-    "homepage": "https://github.com/protibimbok/goravel-vite-plugin#readme",
+    "homepage": "https://github.com/goravel/vite-plugin#readme",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/protibimbok/goravel-vite-plugin.git"
+        "url": "git+https://github.com/goravel/vite-plugin.git"
     },
     "bugs": {
-        "url": "https://github.com/protibimbok/goravel-vite-plugin/issues"
+        "url": "https://github.com/goravel/vite-plugin/issues"
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -31,8 +34,14 @@
     "files": [
         "dist/**/*"
     ],
+    "sideEffects": false,
     "engines": {
         "node": "^20.19.0 || >=22.12.0"
+    },
+    "packageManager": "pnpm@11.20.0",
+    "publishConfig": {
+        "access": "public",
+        "provenance": true
     },
     "scripts": {
         "build": "tsc -p tsconfig.json",
