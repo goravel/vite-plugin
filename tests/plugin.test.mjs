@@ -8,6 +8,11 @@ import goravel, { refreshPaths } from '../dist/index.js'
 
 const appInput = ['resources/css/app.css', 'resources/js/app.js']
 
+// The plugin reads the real environment as well as .env files, so a CI runner's own
+// CI variable would stop every dev-server test. The suite sets what it needs in .env.
+delete process.env.CI
+delete process.env.GORAVEL_BYPASS_ENV_CHECK
+
 const roots = []
 const cwd = process.cwd()
 
