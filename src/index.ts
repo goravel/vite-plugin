@@ -266,11 +266,12 @@ function mergeInput(input: InputOption | undefined, discovered: string[]): Input
         return [...input, ...discovered.filter((entry) => !input.includes(entry))]
     }
 
+    // The name only shapes the hashed file name; the path cannot clash with another entry or a user's name.
     const named = { ...input }
     const known = new Set(Object.values(input))
     for (const entry of discovered) {
         if (!known.has(entry)) {
-            named[entry.replace(/\.[^./\\]+$/, '')] = entry
+            named[entry] = entry
         }
     }
 

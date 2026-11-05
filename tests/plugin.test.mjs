@@ -527,8 +527,13 @@ test('input and assets are added to what is discovered, without repeats', async 
     const single = await resolve(root, goravel({ input: 'resources/js/extra.js', discoverCommand }))
     assert.deepEqual(inputOf(single), ['resources/js/extra.js', 'resources/css/app.css', 'resources/js/app.js'])
 
-    const named = await resolve(root, goravel({ input: { app: 'resources/js/app.js' }, discoverCommand }))
-    assert.deepEqual(inputOf(named), { app: 'resources/js/app.js', 'resources/css/app': 'resources/css/app.css' })
+    // Discovered entries are named after their path, so app.js and app.ts cannot clash with each other or a user's name.
+    const named = await resolve(root, goravel({ input: { app: 'resources/js/app.js', 'resources/js/admin': 'resources/js/admin.css' }, discoverCommand }))
+    assert.deepEqual(inputOf(named), {
+        app: 'resources/js/app.js',
+        'resources/js/admin': 'resources/js/admin.css',
+        'resources/css/app.css': 'resources/css/app.css',
+    })
 })
 
 test('discovered assets are built along with the assets option', async () => {
