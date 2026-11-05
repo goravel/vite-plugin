@@ -162,7 +162,7 @@ The tests run a real Vite build and dev server in a temporary directory. Node st
 
 1. Bump `version` in `package.json` and move the `Unreleased` entries in [CHANGELOG.md](CHANGELOG.md) under the new version.
 2. Commit, tag `vX.Y.Z` and push the tag.
-3. Publish a GitHub release for the tag. The `release` workflow runs the tests and publishes to npm with provenance; it needs an `NPM_TOKEN` repository secret.
+3. Run `pnpm publish`. It builds and runs the tests first.
 
 ## Contributing
 
