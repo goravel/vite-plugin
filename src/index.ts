@@ -38,7 +38,17 @@ export { refreshPaths }
 
 const logger = createLogger('info', { prefix: '[goravel-vite-plugin]' })
 
+/** The hot files of the dev servers running in this process, removed when the process exits. */
+const hotFiles = new Set<string>()
 let exitHandlersBound = false
+
+function removeHotFile(hotFile: string): void {
+    hotFiles.delete(hotFile)
+
+    if (fs.existsSync(hotFile)) {
+        fs.rmSync(hotFile)
+    }
+}
 
 /**
  * Goravel plugin for Vite.
@@ -177,6 +187,7 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
                 }
 
                 fs.writeFileSync(paths.hotFile, `${viteDevServerUrl}${server.config.base.replace(/\/$/, '')}`)
+                hotFiles.add(paths.hotFile)
 
                 setTimeout(() => {
                     server.config.logger.info(
@@ -189,14 +200,16 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
                 }, 100)
             })
 
-            if (!exitHandlersBound) {
-                const clean = () => {
-                    if (fs.existsSync(paths.hotFile)) {
-                        fs.rmSync(paths.hotFile)
-                    }
-                }
+            // A closed server no longer serves anything, so its hot file goes with it.
+            server.httpServer?.once('close', () => removeHotFile(paths.hotFile))
 
-                process.on('exit', clean)
+            // Bound once for the process; every running server's hot file is in the set.
+            if (!exitHandlersBound) {
+                process.on('exit', () => {
+                    for (const hotFile of hotFiles) {
+                        removeHotFile(hotFile)
+                    }
+                })
                 process.on('SIGINT', () => process.exit())
                 process.on('SIGTERM', () => process.exit())
                 process.on('SIGHUP', () => process.exit())

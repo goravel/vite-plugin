@@ -304,6 +304,38 @@ test('a hot file of your own and transformOnServe', async () => {
     }
 })
 
+test('each dev server removes its own hot file when it closes', async () => {
+    const root = project()
+
+    const serve = (hotFile) =>
+        createServer({
+            configFile: false,
+            logLevel: 'silent',
+            root,
+            server: { host: '127.0.0.1', port: 0 },
+            plugins: goravel({ input: appInput, discover: false, hotFile }),
+        })
+
+    const first = await serve('storage/first.hot')
+    const second = await serve('storage/second.hot')
+
+    try {
+        await first.listen()
+        await second.listen()
+        assert.ok(fs.existsSync(path.join(root, 'storage/first.hot')))
+        assert.ok(fs.existsSync(path.join(root, 'storage/second.hot')))
+
+        await second.close()
+        assert.equal(fs.existsSync(path.join(root, 'storage/second.hot')), false)
+        assert.ok(fs.existsSync(path.join(root, 'storage/first.hot')))
+    } finally {
+        await first.close()
+        await second.close()
+    }
+
+    assert.equal(fs.existsSync(path.join(root, 'storage/first.hot')), false)
+})
+
 test('refresh: true watches the view, language and route directories that exist', () => {
     const root = project()
 
