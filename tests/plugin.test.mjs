@@ -34,8 +34,9 @@ function project(files = {}) {
     roots.push(root)
 
     write(root, {
-        'resources/js/app.js': "import '../css/app.css'\nimport { greet } from '@/greet.js'\nexport const message = greet('vite')\n",
+        'resources/js/app.js': "import '../css/greet.css'\nimport { greet } from '@/greet.js'\nexport const message = greet('vite')\n",
         'resources/js/greet.js': 'export const greet = (name) => `hello ${name}`\n',
+        'resources/css/greet.css': 'h1 { color: green; }\n',
         'resources/css/app.css': 'body { color: red; }\n',
         ...files,
     })
@@ -61,9 +62,16 @@ function refreshedPaths(plugins) {
     return plugins.flat(Infinity).flatMap((plugin) => plugin.__goravel_plugin_config?.paths ?? [])
 }
 
-/** The entry points of the resolved build, under whichever key this Vite uses. */
+/** The entry points of the resolved build, under whichever key this Vite uses, relative to the root again. */
 function inputOf(config) {
-    return (config.build.rolldownOptions ?? config.build.rollupOptions).input
+    const input = (config.build.rolldownOptions ?? config.build.rollupOptions).input
+    const relative = (entry) => path.relative(config.root, entry).split(path.sep).join('/')
+
+    if (typeof input === 'string') {
+        return relative(input)
+    }
+
+    return Array.isArray(input) ? input.map(relative) : Object.fromEntries(Object.entries(input).map(([name, entry]) => [name, relative(entry)]))
 }
 
 test('builds into public/build with a manifest the framework reads', async () => {
@@ -174,6 +182,9 @@ test('a real build writes the files and the manifest where the framework looks',
     const css = manifest['resources/css/app.css']
     assert.ok(css.isEntry)
     assert.match(css.file, /^assets\/app-[\w-]+\.css$/)
+    // The stylesheet app.js imports is its own file, not the app.css entry.
+    assert.notEqual(js.css[0], css.file)
+    assert.ok(fs.existsSync(path.join(root, 'public/build', js.css[0])))
 
     // Files of the assets option are built although nothing imports them.
     const logo = manifest['resources/images/logo.svg']

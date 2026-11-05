@@ -95,7 +95,8 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
             // the dev server serves whatever the page asks for, so only a build needs the entries.
             const discovered = pluginConfig.discover ? (pluginConfig.discovered ?? runDiscovery(pluginConfig, root)) : null
             paths = resolvePaths(pluginConfig, discovered, root)
-            const input = command === 'build' ? resolveBuildInput(pluginConfig, discovered, assets) : (pluginConfig.input ?? [])
+            // Absolute, so Rollup (Vite 7) finds the entries under a root that is not the working directory.
+            const input = absoluteInput(command === 'build' ? resolveBuildInput(pluginConfig, discovered, assets) : (pluginConfig.input ?? []), root)
 
             return {
                 base: userConfig.base ?? (command === 'build' ? resolveBase(paths, assetUrl) : ''),
@@ -276,6 +277,19 @@ function mergeInput(input: InputOption | undefined, discovered: string[]): Input
     }
 
     return named
+}
+
+/** The entries resolved against the root. Keys and manifest entries stay as they are; only the lookup changes. */
+function absoluteInput(input: InputOption, root: string): InputOption {
+    if (typeof input === 'string') {
+        return path.resolve(root, input)
+    }
+
+    if (Array.isArray(input)) {
+        return input.map((entry) => path.resolve(root, entry))
+    }
+
+    return Object.fromEntries(Object.entries(input).map(([name, entry]) => [name, path.resolve(root, entry)]))
 }
 
 /** The entries under the key the installed Vite expects: `rolldownOptions` from Vite 8, `rollupOptions` before. */
