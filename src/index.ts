@@ -5,7 +5,7 @@ import { globSync } from 'tinyglobby'
 import { createLogger, loadEnv, version as viteVersion, type ConfigEnv, type Plugin, type ResolvedConfig, type UserConfig } from 'vite'
 import fullReload from 'vite-plugin-full-reload'
 import {
-    defaultRefreshPaths,
+    refreshPaths,
     resolvePaths,
     resolvePluginConfig,
     type DevServerUrl,
@@ -33,8 +33,8 @@ interface GoravelPlugin extends Plugin {
     config: (config: UserConfig, env: ConfigEnv) => UserConfig
 }
 
-/** What `refresh: true` watches; extend it with `refresh: [...refreshPaths, 'app/**']`. */
-export const refreshPaths: string[] = defaultRefreshPaths(process.cwd())
+/** The directories `refresh: true` watches (those that exist); extend them with `refresh: [...refreshPaths, 'app/**']`. */
+export { refreshPaths }
 
 const logger = createLogger('info', { prefix: '[goravel-vite-plugin]' })
 

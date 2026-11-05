@@ -114,11 +114,12 @@ export interface ResolvedPaths {
     manifest: string
 }
 
-/** What `refresh: true` watches, leaving out directories that do not exist. */
-export function defaultRefreshPaths(root: string): string[] {
-    return ['lang/**', 'resources/lang/**', 'resources/views/**', 'routes/**'].filter((pattern) =>
-        existsSync(path.resolve(root, pattern.replace(/\*\*$/, ''))),
-    )
+/** The directories `refresh: true` watches: views, language files and routes. */
+export const refreshPaths: readonly string[] = ['lang/**', 'resources/lang/**', 'resources/views/**', 'routes/**']
+
+/** Those of `refreshPaths` that exist under the given directory. */
+export function existingRefreshPaths(cwd: string): string[] {
+    return refreshPaths.filter((pattern) => existsSync(path.resolve(cwd, pattern.replace(/\*\*$/, ''))))
 }
 
 /** @param cwd - The working directory, which the refresh paths are relative to; the other paths wait for Vite's root. */
@@ -159,7 +160,7 @@ export function resolvePluginConfig(config: string | string[] | PluginConfig | u
         publicDirectory: subdirectory(config.publicDirectory, 'publicDirectory'),
         buildDirectory: subdirectory(config.buildDirectory, 'buildDirectory'),
         hotFile: config.hotFile,
-        refresh: config.refresh === true ? [{ paths: defaultRefreshPaths(cwd) }] : (config.refresh ?? false),
+        refresh: config.refresh === true ? [{ paths: existingRefreshPaths(cwd) }] : (config.refresh ?? false),
         assets: typeof config.assets === 'string' ? [config.assets] : (config.assets ?? []),
         transformOnServe: config.transformOnServe ?? ((code) => code),
     }

@@ -324,7 +324,8 @@ test('other refresh values are watched as given', () => {
         refreshedPaths(goravel({ input: appInput, refresh: [{ paths: ['a/**'] }, { paths: ['b/**'], config: { delay: 300 } }] })),
         ['a/**', 'b/**'],
     )
-    assert.ok(Array.isArray(refreshPaths))
+    assert.deepEqual(refreshPaths, ['lang/**', 'resources/lang/**', 'resources/views/**', 'routes/**'])
+    assert.deepEqual(refreshedPaths(goravel({ input: appInput, refresh: [...refreshPaths, 'app/**'] })), [...refreshPaths, 'app/**'])
 })
 
 test('refuses to start the dev server in CI unless told otherwise', async () => {

@@ -75,7 +75,7 @@ The plugin asks the application where to build and which entries the views refer
 | `publicDirectory` | what the application reports, else `'public'` | The directory the application serves as its web root. Set it only to override the application |
 | `buildDirectory` | what the application reports, else `'build'` | The subdirectory of the public directory the build is written to. Set it only to override `vite.build_directory` |
 | `hotFile` | what the application reports, else `` `${publicDirectory}/hot` `` | Where the dev server announces its URL. Set it only to override `vite.hot_file` |
-| `refresh` | `false` | `true` watches `resources/views/**`, `lang/**`, `resources/lang/**` and `routes/**` (those that exist). A string, a list of globs, or a [vite-plugin-full-reload](https://github.com/ElMassimo/vite-plugin-full-reload) configuration watches exactly that |
+| `refresh` | `false` | `true` watches `resources/views/**`, `lang/**`, `resources/lang/**` and `routes/**` (those that exist). A string, a list of globs, or a [vite-plugin-full-reload](https://github.com/ElMassimo/vite-plugin-full-reload) configuration watches exactly that; the exported `refreshPaths` lists the four, for `refresh: [...refreshPaths, 'app/**']` |
 | `assets` | `[]` | Globs of files to build and version although nothing imports them, in addition to the discovered `viteAsset` files |
 | `transformOnServe` | | `(code, devServerUrl) => code`, applied to everything the dev server serves |
 
