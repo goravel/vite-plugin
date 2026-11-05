@@ -118,6 +118,22 @@ test('ASSET_URL prefixes the base in a build', async () => {
     assert.equal(served.base, '/')
 })
 
+test("a build.outDir of the user's own moves the URLs with it", async () => {
+    const root = project({ '.env': 'ASSET_URL=https://cdn.example.com\n' })
+
+    const inside = await resolve(root, goravel({ input: appInput, discover: false }), { build: { outDir: 'public/dist/v2' } })
+    assert.equal(inside.base, 'https://cdn.example.com/dist/v2/')
+
+    const absolute = await resolve(root, goravel({ input: appInput, discover: false, publicDirectory: 'www' }), { build: { outDir: path.join(root, 'www/assets') } })
+    assert.equal(absolute.base, 'https://cdn.example.com/assets/')
+
+    // Outside the public directory nothing can serve it; the URLs fall back to the build directory.
+    const outside = await resolve(root, goravel({ input: appInput, discover: false }), { build: { outDir: 'dist' } })
+    assert.equal(outside.base, 'https://cdn.example.com/build/')
+    const itself = await resolve(root, goravel({ input: appInput, discover: false }), { build: { outDir: 'public' } })
+    assert.equal(itself.base, 'https://cdn.example.com/build/')
+})
+
 test("the user's own configuration wins", async () => {
     const root = project()
     const config = await resolve(root, goravel({ input: appInput, discover: false }), {

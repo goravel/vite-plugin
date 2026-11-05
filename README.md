@@ -89,7 +89,7 @@ config.Add("vite", map[string]any{
 })
 ```
 
-The `publicDirectory`, `buildDirectory` and `hotFile` options exist for the case where the plugin cannot ask, or has to disagree. Vite's own `build.manifest` and `build.outDir` win over everything, as usual.
+The `publicDirectory`, `buildDirectory` and `hotFile` options exist for the case where the plugin cannot ask, or has to disagree. Vite's own `build.manifest` and `build.outDir` win over everything, as usual; a `build.outDir` inside the public directory moves the asset URLs with it.
 
 ## Discovery
 

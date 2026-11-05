@@ -109,7 +109,7 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
             const input = absoluteInput(command === 'build' ? resolveBuildInput(pluginConfig, discovered, assets) : (pluginConfig.input ?? []), root)
 
             return {
-                base: userConfig.base ?? (command === 'build' ? resolveBase(paths, assetUrl) : ''),
+                base: userConfig.base ?? (command === 'build' ? resolveBase(userBuildDirectory(userConfig, paths, root) ?? paths.buildDirectory, assetUrl) : ''),
                 // Vite's own public directory would be copied into the build; Goravel serves public/ itself.
                 publicDir: userConfig.publicDir ?? false,
                 build: {
@@ -313,8 +313,30 @@ function bundlerOptions(userConfig: UserConfig, input: InputOption): Pick<NonNul
 }
 
 /** The public URL of the build directory, under ASSET_URL when one is set. */
-function resolveBase(paths: ResolvedPaths, assetUrl: string): string {
-    return assetUrl + (!assetUrl.endsWith('/') ? '/' : '') + paths.buildDirectory + '/'
+function resolveBase(buildDirectory: string, assetUrl: string): string {
+    return assetUrl + (!assetUrl.endsWith('/') ? '/' : '') + buildDirectory + '/'
+}
+
+/** Where a `build.outDir` of the user's own sits inside the public directory, so the URLs move with it; undefined (with a warning) when it does not. */
+function userBuildDirectory(userConfig: UserConfig, paths: ResolvedPaths, root: string): string | undefined {
+    const outDir = userConfig.build?.outDir
+
+    if (!outDir) {
+        return undefined
+    }
+
+    const relative = path.relative(path.resolve(root, paths.publicDirectory), path.resolve(root, outDir))
+
+    if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+        logger.warn(
+            `build.outDir "${outDir}" is not a subdirectory of the public directory "${paths.publicDirectory}", so the application cannot serve it; the URLs assume "${paths.buildDirectory}".`,
+            { timestamp: true },
+        )
+
+        return undefined
+    }
+
+    return relative.split(path.sep).join('/')
 }
 
 /** Emits the `assets` option and the discovered assets into the build, so they are versioned and in the manifest. */
