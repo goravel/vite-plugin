@@ -13,8 +13,12 @@ jobs:
       fail-fast: false
       matrix:
         node: [22, 24]
+        include:
+          # The oldest Vite the peer dependency allows; the dev dependency is the newest.
+          - node: 22
+            vite: 7
 
-    name: Node ${{ matrix.node }}
+    name: Node ${{ matrix.node }}${{ matrix.vite && format(' / Vite {0}', matrix.vite) || '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -32,5 +36,13 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
-      - name: Build and run tests
-        run: pnpm test
+      - name: Build
+        run: pnpm run build
+
+      # The sources type-check against the newest Vite; the built plugin runs on the older one.
+      - name: Install Vite ${{ matrix.vite }}
+        if: matrix.vite
+        run: pnpm add --save-dev vite@${{ matrix.vite }}
+
+      - name: Run tests
+        run: pnpm run test:run

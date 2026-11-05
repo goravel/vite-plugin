@@ -47,7 +47,8 @@
         "build": "tsc -p tsconfig.json",
         "dev": "tsc -p tsconfig.json --watch",
         "typecheck": "tsc -p tsconfig.json --noEmit",
-        "test": "npm run build && node --test \"tests/**/*.test.mjs\"",
+        "test": "npm run build && npm run test:run",
+        "test:run": "node --test \"tests/**/*.test.mjs\"",
         "prepublishOnly": "npm run test"
     },
     "devDependencies": {
