@@ -216,7 +216,7 @@ test('a real build writes the files and the manifest where the framework looks',
 })
 
 test('the dev server announces itself in the hot file', async () => {
-    const root = project({ '.env': 'APP_URL=http://localhost:3000\n' })
+    const root = project({ '.env': 'APP_URL=http://localhost:3000\n', 'resources/images/logo.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>' })
 
     const server = await createServer({
         configFile: false,
@@ -235,8 +235,9 @@ test('the dev server announces itself in the hot file', async () => {
         assert.ok(fs.existsSync(hotFile))
         assert.equal(fs.readFileSync(hotFile, 'utf8'), `http://127.0.0.1:${port}`)
 
-        // Served code refers to the dev server, not the placeholder origin.
-        const result = await server.transformRequest('/resources/js/app.js')
+        // Served code refers to the dev server, not the placeholder origin Vite was configured with.
+        const result = await server.transformRequest('/resources/images/logo.svg?import')
+        assert.match(result.code, new RegExp(`http://127\\.0\\.0\\.1:${port}/resources/images/logo.svg`))
         assert.doesNotMatch(result.code, /__goravel_vite_placeholder__/)
 
         // Opening the dev server itself explains where the application is.
@@ -321,6 +322,47 @@ test('a hot file of your own and transformOnServe', async () => {
         assert.deepEqual([...new Set(seen)], [`http://127.0.0.1:${port}`])
     } finally {
         await server.close()
+    }
+})
+
+test('in middleware mode the URL comes from server.origin, or stays unknown', async () => {
+    const root = project({ 'resources/images/logo.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>' })
+    const seen = []
+
+    const serve = (server) =>
+        createServer({
+            configFile: false,
+            logLevel: 'silent',
+            root,
+            server: { middlewareMode: true, ...server },
+            plugins: goravel({
+                input: appInput,
+                discover: false,
+                transformOnServe: (code, url) => {
+                    seen.push(url)
+                    return code
+                },
+            }),
+        })
+
+    // Vite has no server of its own, so the plugin cannot know a URL; it leaves the code alone rather than writing "undefined".
+    const unknown = await serve({})
+    try {
+        const result = await unknown.transformRequest('/resources/images/logo.svg?import')
+        assert.match(result.code, /__goravel_vite_placeholder__/)
+        assert.doesNotMatch(result.code, /undefined/)
+        assert.deepEqual(seen, [])
+    } finally {
+        await unknown.close()
+    }
+
+    const origin = await serve({ origin: 'http://assets.test:5173' })
+    try {
+        const result = await origin.transformRequest('/resources/images/logo.svg?import')
+        assert.match(result.code, /http:\/\/assets\.test:5173\/resources\/images\/logo\.svg/)
+        assert.deepEqual([...new Set(seen)], ['http://assets.test:5173'])
+    } finally {
+        await origin.close()
     }
 })
 

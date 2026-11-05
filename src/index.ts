@@ -155,9 +155,15 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
         },
         configResolved(config) {
             resolvedConfig = config
+
+            // An origin of the user's own is the URL from the start, before (or without) a server listening.
+            if (userConfig.server?.origin) {
+                viteDevServerUrl = userConfig.server.origin as DevServerUrl
+            }
         },
         transform(code) {
-            if (resolvedConfig.command === 'serve') {
+            // Until the URL is known there is nothing to put in place of the placeholder (middleware mode never knows it).
+            if (resolvedConfig.command === 'serve' && viteDevServerUrl) {
                 code = code.replaceAll(placeholderOrigin, viteDevServerUrl)
 
                 return pluginConfig.transformOnServe(code, viteDevServerUrl)
@@ -173,9 +179,7 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
                     return
                 }
 
-                viteDevServerUrl = userConfig.server?.origin
-                    ? (userConfig.server.origin as DevServerUrl)
-                    : resolveDevServerUrl(address, server.config)
+                viteDevServerUrl ??= resolveDevServerUrl(address, server.config)
 
                 const hotFileParentDirectory = path.dirname(paths.hotFile)
                 if (!fs.existsSync(hotFileParentDirectory)) {
