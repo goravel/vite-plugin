@@ -392,6 +392,26 @@ test('refuses to start the dev server in CI unless told otherwise', async () => 
     assert.equal(built.command, 'build')
 })
 
+test('TLS certificates from the environment are relative to the root', async () => {
+    const root = project({
+        '.env': 'APP_URL=https://app.test\nVITE_DEV_SERVER_KEY=certs/key.pem\nVITE_DEV_SERVER_CERT=certs/cert.pem\n',
+        'certs/key.pem': 'key',
+        'certs/cert.pem': 'cert',
+    })
+    process.chdir(os.tmpdir())
+
+    const config = await resolve(root, goravel({ input: appInput, discover: false }), {}, 'serve')
+
+    assert.equal(config.server.host, 'app.test')
+    assert.equal(config.server.https.key.toString(), 'key')
+    assert.equal(config.server.https.cert.toString(), 'cert')
+
+    await assert.rejects(
+        () => resolve(root, goravel({ input: appInput, discover: false }), { envDir: writeEnv(root, 'VITE_DEV_SERVER_KEY=missing.pem\nVITE_DEV_SERVER_CERT=certs/cert.pem\n') }, 'serve'),
+        /Unable to find the certificate files/,
+    )
+})
+
 function writeEnv(root, content) {
     const dir = path.join(root, 'env-' + Math.random().toString(36).slice(2))
     write(dir, { '.env': content })

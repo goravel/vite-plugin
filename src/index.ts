@@ -97,7 +97,7 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
             const root = path.resolve(userConfig.root ?? process.cwd())
             const env = loadEnv(mode, path.resolve(root, typeof userConfig.envDir === 'string' ? userConfig.envDir : ''), '')
             const assetUrl = env.ASSET_URL ?? ''
-            const serverConfig = command === 'serve' ? resolveEnvironmentServerConfig(env) : undefined
+            const serverConfig = command === 'serve' ? resolveEnvironmentServerConfig(env, root) : undefined
 
             ensureCommandShouldRunInEnvironment(command, env)
 

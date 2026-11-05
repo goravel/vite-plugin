@@ -36,12 +36,16 @@ export interface EnvironmentServerConfig {
     https: { key: Buffer; cert: Buffer }
 }
 
-export function resolveEnvironmentServerConfig(env: Record<string, string>): EnvironmentServerConfig | undefined {
+/** @param root - What relative certificate paths are resolved against. */
+export function resolveEnvironmentServerConfig(env: Record<string, string>, root: string): EnvironmentServerConfig | undefined {
     if (!env.VITE_DEV_SERVER_KEY && !env.VITE_DEV_SERVER_CERT) {
         return
     }
 
-    if (!fs.existsSync(env.VITE_DEV_SERVER_KEY) || !fs.existsSync(env.VITE_DEV_SERVER_CERT)) {
+    const key = path.resolve(root, env.VITE_DEV_SERVER_KEY ?? '')
+    const cert = path.resolve(root, env.VITE_DEV_SERVER_CERT ?? '')
+
+    if (!env.VITE_DEV_SERVER_KEY || !env.VITE_DEV_SERVER_CERT || !fs.existsSync(key) || !fs.existsSync(cert)) {
         throw Error(
             `Unable to find the certificate files specified in your environment. Ensure you have correctly configured VITE_DEV_SERVER_KEY: [${env.VITE_DEV_SERVER_KEY}] and VITE_DEV_SERVER_CERT: [${env.VITE_DEV_SERVER_CERT}].`,
         )
@@ -57,8 +61,8 @@ export function resolveEnvironmentServerConfig(env: Record<string, string>): Env
         hmr: { host },
         host,
         https: {
-            key: fs.readFileSync(env.VITE_DEV_SERVER_KEY),
-            cert: fs.readFileSync(env.VITE_DEV_SERVER_CERT),
+            key: fs.readFileSync(key),
+            cert: fs.readFileSync(cert),
         },
     }
 }

@@ -134,7 +134,7 @@ The plugin reads your `.env`:
 | --- | --- |
 | `APP_URL` | Shown in the dev server banner and on the page the dev server serves when it is opened directly |
 | `ASSET_URL` | Prefixes the build's `base`, for assets served from a CDN. Set `app.asset_url` in the framework to match |
-| `VITE_DEV_SERVER_KEY`, `VITE_DEV_SERVER_CERT` | Serve the dev server over TLS with these files. The host is taken from `APP_URL` |
+| `VITE_DEV_SERVER_KEY`, `VITE_DEV_SERVER_CERT` | Serve the dev server over TLS with these files, relative to the project root. The host is taken from `APP_URL` |
 | `CI` | The dev server refuses to start when this is set; set `GORAVEL_BYPASS_ENV_CHECK=1` to start it anyway |
 
 ## Reloading
