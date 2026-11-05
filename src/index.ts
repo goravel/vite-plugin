@@ -95,7 +95,8 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
             userConfig = config
             // Vite resolves its own paths against this; so does the plugin, and the application runs here.
             const root = path.resolve(userConfig.root ?? process.cwd())
-            const env = loadEnv(mode, path.resolve(root, typeof userConfig.envDir === 'string' ? userConfig.envDir : ''), '')
+            // Vite's envDir, relative to the root; false leaves only the process environment, as it does for Vite.
+            const env = loadEnv(mode, userConfig.envDir === false ? false : path.resolve(root, userConfig.envDir ?? ''), '')
             const assetUrl = env.ASSET_URL ?? ''
             const serverConfig = command === 'serve' ? resolveEnvironmentServerConfig(env, root) : undefined
 
@@ -163,8 +164,7 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
             }
         },
         configureServer(server) {
-            const envDir = resolvedConfig.envDir || resolvedConfig.root
-            const appUrl = loadEnv(resolvedConfig.mode, envDir, 'APP_URL').APP_URL ?? 'undefined'
+            const appUrl = loadEnv(resolvedConfig.mode, resolvedConfig.envDir, 'APP_URL').APP_URL ?? 'undefined'
 
             server.httpServer?.once('listening', () => {
                 const address = server.httpServer?.address()

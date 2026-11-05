@@ -128,7 +128,7 @@ goravel({ input: ['resources/css/app.css', 'resources/js/app.js'], discover: fal
 
 ## Environment
 
-The plugin reads your `.env`:
+The plugin reads your `.env` from Vite's `envDir`, so `envDir: false` leaves only the process environment:
 
 | Variable | |
 | --- | --- |

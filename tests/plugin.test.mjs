@@ -412,6 +412,17 @@ test('TLS certificates from the environment are relative to the root', async () 
     )
 })
 
+test('envDir: false leaves only the process environment', async () => {
+    const root = project({ '.env': 'CI=1\nASSET_URL=https://cdn.example.com\n' })
+
+    // The .env would stop the dev server and move the base; Vite is told not to read it, so neither happens.
+    const served = await resolve(root, goravel({ input: appInput, discover: false }), { envDir: false }, 'serve')
+    assert.equal(served.command, 'serve')
+
+    const built = await resolve(root, goravel({ input: appInput, discover: false }), { envDir: false })
+    assert.equal(built.base, '/build/')
+})
+
 function writeEnv(root, content) {
     const dir = path.join(root, 'env-' + Math.random().toString(36).slice(2))
     write(dir, { '.env': content })
