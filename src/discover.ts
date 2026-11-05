@@ -71,7 +71,17 @@ export function discoverInputs(command: string[], root: string, timeout: number 
         )
     }
 
-    return validateInputs(JSON.parse(line))
+    let parsed: unknown
+    try {
+        parsed = JSON.parse(line)
+    } catch (error) {
+        throw new Error(
+            `goravel-vite-plugin: "${command.join(' ')}" printed a line that is not JSON (${(error as Error).message}):\n${line}\n` +
+                explainAlternatives(),
+        )
+    }
+
+    return validateInputs(parsed)
 }
 
 /** Checks the shape of the command's output or of the `discovered` option. */

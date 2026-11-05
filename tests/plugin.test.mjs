@@ -643,6 +643,11 @@ test('explains a failing or silent discovery command', async () => {
     )
 
     await assert.rejects(
+        () => resolve(root, goravel({ discoverCommand: fakeArtisan(root, '{"inputs": [truncated') })),
+        (error) => /printed a line that is not JSON/.test(error.message) && /\{"inputs": \[truncated/.test(error.message) && /discover: false/.test(error.message),
+    )
+
+    await assert.rejects(
         () => resolve(root, goravel({ discoverCommand: fakeArtisan(root, { inputs: 'nope' }) })),
         /discovered inputs must look like/,
     )
