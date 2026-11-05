@@ -352,7 +352,7 @@ test('rejects malformed options', async () => {
 
     const resolved = resolvePluginConfig({ input: 'a.js', assets: 'images/*' }, '/app')
     assert.equal(resolved.hotFile, undefined)
-    assert.equal(resolvePluginConfig({ input: 'a.js', hotFile: 'storage/hot' }, '/app').hotFile, path.resolve('/app', 'storage', 'hot'))
+    assert.equal(resolvePluginConfig({ input: 'a.js', hotFile: 'storage/hot' }, '/app').hotFile, 'storage/hot')
     assert.equal(resolved.refresh, false)
     assert.deepEqual(resolved.assets, ['images/*'])
     assert.equal(resolved.transformOnServe('code', 'http://localhost:5173'), 'code')
@@ -425,6 +425,51 @@ test('the paths come from the application', async () => {
         hotFile: path.resolve('/app', 'hot'),
         manifest: 'manifest.json',
     })
+})
+
+test('paths, discovery and the environment follow the Vite root, not the working directory', async () => {
+    const root = project({
+        '.env': 'ASSET_URL=https://cdn.example.com\n',
+        'resources/images/logo.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    })
+    const discoverCommand = fakeArtisan(root, moved)
+
+    // Somewhere else entirely; only the configuration names the project.
+    process.chdir(os.tmpdir())
+
+    // The .env is read from the root.
+    const config = await resolve(root, goravel({ discoverCommand }))
+    assert.equal(config.base, 'https://cdn.example.com/assets/')
+
+    await build({
+        configFile: false,
+        logLevel: 'silent',
+        root,
+        plugins: goravel({ discoverCommand }),
+    })
+
+    assert.deepEqual(calls(root), ['vite:inputs', 'vite:inputs'])
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, 'www/assets/manifest.json'), 'utf8'))
+    assert.ok(manifest['resources/js/app.js'].isEntry)
+    assert.match(manifest['resources/images/logo.svg'].file, /^assets\/logo-[\w-]+\.svg$/)
+
+    const server = await createServer({
+        configFile: false,
+        logLevel: 'silent',
+        root: path.relative(process.cwd(), root),
+        server: { host: '127.0.0.1', port: 0 },
+        plugins: goravel({ discoverCommand, hotFile: 'tmp/hot' }),
+    })
+
+    try {
+        await server.listen()
+
+        const { port } = server.httpServer.address()
+        assert.equal(fs.readFileSync(path.join(root, 'tmp', 'hot'), 'utf8'), `http://127.0.0.1:${port}`)
+        assert.equal(fs.existsSync(path.join(process.cwd(), 'tmp', 'hot')), false)
+    } finally {
+        await server.close()
+    }
 })
 
 test('a build goes where the application reads it', async () => {

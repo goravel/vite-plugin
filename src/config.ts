@@ -54,7 +54,7 @@ export interface PluginConfig {
     buildDirectory?: string
 
     /**
-     * The file the dev server announces its URL in, relative to the project root. Overrides `vite.hot_file`.
+     * The file the dev server announces its URL in, relative to the project root (Vite's `root`). Overrides `vite.hot_file`.
      *
      * @default what the application reports, or `${publicDirectory}/hot`
      */
@@ -86,7 +86,7 @@ export interface ResolvedPluginConfig {
     discover: boolean
     discoverCommand: string[]
     discovered: DiscoveredInputs | null
-    /** As the options set them; undefined where the application decides. */
+    /** As the options set them; undefined where the application decides. The hot file is resolved against the root by `resolvePaths`. */
     publicDirectory: string | undefined
     buildDirectory: string | undefined
     hotFile: string | undefined
@@ -112,7 +112,8 @@ export function defaultRefreshPaths(root: string): string[] {
     )
 }
 
-export function resolvePluginConfig(config: string | string[] | PluginConfig | undefined, root: string): ResolvedPluginConfig {
+/** @param cwd - The working directory, which the refresh paths are relative to; the other paths wait for Vite's root. */
+export function resolvePluginConfig(config: string | string[] | PluginConfig | undefined, cwd: string): ResolvedPluginConfig {
     if (typeof config === 'undefined') {
         throw new Error('goravel-vite-plugin: missing configuration.')
     }
@@ -141,14 +142,18 @@ export function resolvePluginConfig(config: string | string[] | PluginConfig | u
         discovered: config.discovered ? validateInputs(config.discovered) : null,
         publicDirectory: subdirectory(config.publicDirectory, 'publicDirectory'),
         buildDirectory: subdirectory(config.buildDirectory, 'buildDirectory'),
-        hotFile: config.hotFile === undefined ? undefined : path.resolve(root, config.hotFile),
-        refresh: config.refresh === true ? [{ paths: defaultRefreshPaths(root) }] : (config.refresh ?? false),
+        hotFile: config.hotFile,
+        refresh: config.refresh === true ? [{ paths: defaultRefreshPaths(cwd) }] : (config.refresh ?? false),
         assets: typeof config.assets === 'string' ? [config.assets] : (config.assets ?? []),
         transformOnServe: config.transformOnServe ?? ((code) => code),
     }
 }
 
-/** The paths of this run: an option wins, then what the application reported, then the framework's defaults. */
+/**
+ * The paths of this run: an option wins, then what the application reported, then the framework's defaults.
+ *
+ * @param root - Vite's resolved root, which the project-relative paths are resolved against.
+ */
 export function resolvePaths(config: ResolvedPluginConfig, discovered: DiscoveredInputs | null, root: string): ResolvedPaths {
     const reported = discovered?.paths
     const publicDirectory = config.publicDirectory ?? (reported ? subdirectory(reported.public_directory, 'public_directory') : undefined) ?? 'public'
@@ -157,7 +162,7 @@ export function resolvePaths(config: ResolvedPluginConfig, discovered: Discovere
     return {
         publicDirectory,
         buildDirectory,
-        hotFile: config.hotFile ?? path.resolve(root, reported?.hot_file ?? path.join(publicDirectory, 'hot')),
+        hotFile: path.resolve(root, config.hotFile ?? reported?.hot_file ?? path.join(publicDirectory, 'hot')),
         manifest: reported?.manifest ?? defaultManifest,
     }
 }

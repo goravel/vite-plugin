@@ -51,6 +51,9 @@ let exitHandlersBound = false
  * `discover` is false, the paths and the entries the views reference come from
  * the application, so `config/vite.go` is the only place they are set.
  *
+ * Paths are relative to Vite's `root`, which is the project root unless the
+ * configuration moves it.
+ *
  * @param config - A configuration object, or the entry point(s) to build.
  */
 export function goravel(config: string | string[] | PluginConfig = {}): [GoravelPlugin, ...Plugin[]] {
@@ -59,7 +62,7 @@ export function goravel(config: string | string[] | PluginConfig = {}): [Goravel
 
     return [
         resolveGoravelPlugin(pluginConfig, assets),
-        ...resolveAssetPlugin(assets),
+        resolveAssetPlugin(assets),
         ...resolveFullReloadConfig(pluginConfig),
     ]
 }
@@ -80,7 +83,9 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
         enforce: 'post',
         config: (config, { command, mode }) => {
             userConfig = config
-            const env = loadEnv(mode, userConfig.envDir || process.cwd(), '')
+            // Vite resolves its own paths against this; so does the plugin, and the application runs here.
+            const root = path.resolve(userConfig.root ?? process.cwd())
+            const env = loadEnv(mode, path.resolve(root, typeof userConfig.envDir === 'string' ? userConfig.envDir : ''), '')
             const assetUrl = env.ASSET_URL ?? ''
             const serverConfig = command === 'serve' ? resolveEnvironmentServerConfig(env) : undefined
 
@@ -88,8 +93,8 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
 
             // The application says where to build and which entries the views reference;
             // the dev server serves whatever the page asks for, so only a build needs the entries.
-            const discovered = pluginConfig.discover ? (pluginConfig.discovered ?? runDiscovery(pluginConfig)) : null
-            paths = resolvePaths(pluginConfig, discovered, process.cwd())
+            const discovered = pluginConfig.discover ? (pluginConfig.discovered ?? runDiscovery(pluginConfig, root)) : null
+            paths = resolvePaths(pluginConfig, discovered, root)
             const input = command === 'build' ? resolveBuildInput(pluginConfig, discovered, assets) : (pluginConfig.input ?? [])
 
             return {
@@ -147,7 +152,7 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
             }
         },
         configureServer(server) {
-            const envDir = resolvedConfig.envDir || process.cwd()
+            const envDir = resolvedConfig.envDir || resolvedConfig.root
             const appUrl = loadEnv(resolvedConfig.mode, envDir, 'APP_URL').APP_URL ?? 'undefined'
 
             server.httpServer?.once('listening', () => {
@@ -241,10 +246,10 @@ function resolveBuildInput(pluginConfig: ResolvedPluginConfig, discovered: Disco
     return input
 }
 
-function runDiscovery(pluginConfig: ResolvedPluginConfig): DiscoveredInputs {
+function runDiscovery(pluginConfig: ResolvedPluginConfig, root: string): DiscoveredInputs {
     logger.info(`Asking the application for its paths and entry points with "${pluginConfig.discoverCommand.join(' ')}"`, { timestamp: true })
 
-    return discoverInputs(pluginConfig.discoverCommand, process.cwd())
+    return discoverInputs(pluginConfig.discoverCommand, root)
 }
 
 /** Adds the discovered entries to `input` without changing its shape or repeating an entry. */
@@ -285,29 +290,35 @@ function resolveBase(paths: ResolvedPaths, assetUrl: string): string {
 }
 
 /** Emits the `assets` option and the discovered assets into the build, so they are versioned and in the manifest. */
-function resolveAssetPlugin(assets: Set<string>): Plugin[] {
-    return [
-        {
-            name: 'goravel:assets',
-            apply: 'build',
-            buildStart() {
-                if (assets.size === 0) {
-                    return
-                }
+function resolveAssetPlugin(assets: Set<string>): Plugin {
+    let root: string
 
-                for (const file of globSync([...assets])) {
-                    if (fs.statSync(file).isFile()) {
-                        this.emitFile({
-                            type: 'asset',
-                            name: path.basename(file),
-                            originalFileName: file,
-                            source: fs.readFileSync(file),
-                        })
-                    }
-                }
-            },
+    return {
+        name: 'goravel:assets',
+        apply: 'build',
+        configResolved(config) {
+            root = config.root
         },
-    ]
+        buildStart() {
+            if (assets.size === 0) {
+                return
+            }
+
+            // Globs are relative to the root, and so are the manifest keys.
+            for (const file of globSync([...assets], { cwd: root })) {
+                const absolute = path.join(root, file)
+
+                if (fs.statSync(absolute).isFile()) {
+                    this.emitFile({
+                        type: 'asset',
+                        name: path.basename(file),
+                        originalFileName: file,
+                        source: fs.readFileSync(absolute),
+                    })
+                }
+            }
+        },
+    }
 }
 
 /** One full-reload plugin per refresh configuration. */

@@ -69,7 +69,7 @@ The plugin asks the application where to build and which entries the views refer
 | --- | --- | --- |
 | `input` | | Entry points to build, relative to the project root, in addition to the discovered ones. Required when `discover` is `false` |
 | `discover` | `true` | Ask the application for its paths and for the entry points and assets the views reference. A build builds them too; the dev server only takes the paths |
-| `discoverCommand` | `['go', 'run', '.', 'artisan', 'vite:inputs']` | The command that prints them, run in the project root. A string is split on whitespace |
+| `discoverCommand` | `['go', 'run', '.', 'artisan', 'vite:inputs']` | The command that prints them, run in the project root (Vite's `root`). A string is split on whitespace |
 | `discovered` | | The output of `artisan vite:inputs`, for builds that cannot run the application. The command is then not run |
 | `publicDirectory` | what the application reports, else `'public'` | The directory the application serves as its web root. Set it only to override the application |
 | `buildDirectory` | what the application reports, else `'build'` | The subdirectory of the public directory the build is written to. Set it only to override `vite.build_directory` |
