@@ -138,6 +138,24 @@ The plugin reads your `.env` from Vite's `envDir`, so `envDir: false` leaves onl
 | `VITE_DEV_SERVER_KEY`, `VITE_DEV_SERVER_CERT` | Serve the dev server over TLS with these files, relative to the project root. The host is taken from `APP_URL` |
 | `CI` | The dev server refuses to start when this is set; set `GORAVEL_BYPASS_ENV_CHECK=1` to start it anyway |
 
+## Other devices on the network
+
+The hot file carries the address the plugin works out from the socket Vite bound. A wildcard bind (`server.host: true`) is handed out as `localhost`, which only works on this machine. For a phone or another machine, name the address they reach this machine at:
+
+```js
+export default defineConfig({
+    server: {
+        host: true,
+        hmr: { host: '192.168.1.5' },
+        // Only needed when the address above is a name rather than an IP
+        allowedHosts: ['dev.example.test'],
+    },
+    plugins: [goravel({ refresh: true })],
+})
+```
+
+To state the whole URL, behind a reverse proxy, a tunnel or an HTTPS terminator, set [`server.origin`](https://vite.dev/config/server-options#server-origin) instead. It wins over `server.hmr.host` and the bound address, and is what the hot file carries and what Vite writes into asset URLs, so both agree. It has to be an `http` or `https` URL; anything else is reported and ignored.
+
 ## Reloading
 
 Go templates are parsed when the application boots, so a change to a `.tmpl` file reaches the browser only once the Go process has restarted. `refresh: true` is most useful next to a watcher such as [air](https://github.com/air-verse/air) that rebuilds the server for you: the reload then shows the restarted server's output.

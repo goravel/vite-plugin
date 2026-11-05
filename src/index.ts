@@ -17,6 +17,7 @@ import {
 } from './config.js'
 import { discoverInputs, type DiscoveredInputs } from './discover.js'
 import {
+    configuredOrigin,
     devServerIndex,
     ensureCommandShouldRunInEnvironment,
     goravelVersion,
@@ -98,8 +99,8 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
     }
     awaitDevServerUrl()
     let warnedUnknownUrl = false
-
-    const userOrigin = (): DevServerUrl | undefined => (userConfig.server?.origin ? (userConfig.server.origin as DevServerUrl) : undefined)
+    // A server.origin of the user's own, once validated.
+    let origin: DevServerUrl | undefined
 
     return {
         name: 'goravel',
@@ -172,7 +173,7 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
             resolvedConfig = config
 
             // An origin of the user's own is the URL from the start, before (or without) a server listening.
-            const origin = userOrigin()
+            origin = configuredOrigin(config)
             if (origin) {
                 setDevServerUrl(origin)
             }
@@ -208,7 +209,6 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
         },
         configureServer(server) {
             const appUrl = loadEnv(resolvedConfig.mode, resolvedConfig.envDir, 'APP_URL').APP_URL ?? 'undefined'
-            const origin = userOrigin()
 
             // A restarted server binds anew, unless the origin was configured.
             if (!origin) {

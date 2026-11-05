@@ -1,13 +1,52 @@
 import fs from 'node:fs'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
+import colors from 'picocolors'
 import type { ResolvedConfig } from 'vite'
 import type { DevServerUrl } from './config.js'
 
 /** The origin the dev server uses until its address is known; `transform` rewrites served code to the real URL. */
 export const placeholderOrigin = 'http://__goravel_vite_placeholder__.test'
 
-/** The dev server URL as the browser reaches it, honouring an explicit host or HMR config. */
+/**
+ * The `server.origin` of the user's own, trimmed of trailing slashes, or undefined where
+ * there is none. One that is not an http(s) URL is reported and ignored: the hot file
+ * has to carry a URL the browser can reach.
+ */
+export function configuredOrigin(config: ResolvedConfig): DevServerUrl | undefined {
+    const origin = config.server.origin
+
+    if (!origin || origin === placeholderOrigin) {
+        return undefined
+    }
+
+    const trimmed = origin.replace(/\/+$/, '')
+    let protocol = ''
+    try {
+        protocol = new URL(trimmed).protocol
+    } catch {
+        // Not a URL at all.
+    }
+
+    if (protocol !== 'http:' && protocol !== 'https:') {
+        config.logger.warn(
+            colors.yellow(
+                `goravel-vite-plugin: 'server.origin' is '${origin}', which is not an http or https URL. ` +
+                    'The application reads the hot file to find the dev server and needs one, so the address Vite binds is written instead.',
+            ),
+        )
+
+        return undefined
+    }
+
+    return trimmed as DevServerUrl
+}
+
+/**
+ * The dev server URL as the browser reaches it: the host from `server.hmr.host` or
+ * `server.host` when one is named, else the bound address, with a wildcard or IPv6
+ * loopback bind handed out as `localhost`, which browsers and CSP accept.
+ */
 export function resolveDevServerUrl(address: AddressInfo, config: ResolvedConfig): DevServerUrl {
     const configHmrProtocol = typeof config.server.hmr === 'object' ? config.server.hmr.protocol : null
     const clientProtocol = configHmrProtocol ? (configHmrProtocol === 'wss' ? 'https' : 'http') : null
@@ -16,13 +55,38 @@ export function resolveDevServerUrl(address: AddressInfo, config: ResolvedConfig
 
     const configHmrHost = typeof config.server.hmr === 'object' ? config.server.hmr.host : null
     const configHost = typeof config.server.host === 'string' ? config.server.host : null
-    const serverAddress = isIpv6(address) ? `[${address.address}]` : address.address
-    const host = configHmrHost ?? configHost ?? serverAddress
+    const usableConfigHost = [configHmrHost, configHost].find((host): host is string => typeof host === 'string' && host !== '' && !isWildcard(host))
+
+    const serverAddress =
+        isWildcard(address.address) || isIpv6Loopback(address.address) ? 'localhost' : isIpv6(address) ? `[${address.address}]` : address.address
+    const host = usableConfigHost ? bracketIpv6(usableConfigHost) : serverAddress
+
+    if (!usableConfigHost && isWildcard(address.address)) {
+        config.logger.warn(
+            colors.yellow(
+                `goravel-vite-plugin: Vite is exposed to the network (it is bound to '${address.address}'), but the hot file points browsers at '${host}', ` +
+                    "which only works on this machine. For other devices, set 'server.hmr.host' to the address they reach this machine at, " +
+                    "and 'server.allowedHosts' too if that address is a name rather than an IP.",
+            ),
+        )
+    }
 
     const configHmrClientPort = typeof config.server.hmr === 'object' ? config.server.hmr.clientPort : null
     const port = configHmrClientPort ?? address.port
 
     return `${protocol}://${host}:${port}`
+}
+
+function bracketIpv6(host: string): string {
+    return !host.includes(':') || host.startsWith('[') ? host : `[${host}]`
+}
+
+function isWildcard(host: string): boolean {
+    return host === '::' || host === '[::]' || host === '0.0.0.0'
+}
+
+function isIpv6Loopback(host: string): boolean {
+    return host === '::1' || host === '[::1]' || host === '0000:0000:0000:0000:0000:0000:0000:0001'
 }
 
 function isIpv6(address: AddressInfo): boolean {

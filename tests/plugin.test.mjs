@@ -5,6 +5,7 @@ import path from 'node:path'
 import { afterEach, test } from 'node:test'
 import { build, createServer, resolveConfig } from 'vite'
 import goravel, { refreshPaths } from '../dist/index.js'
+import { configuredOrigin, resolveDevServerUrl } from '../dist/server.js'
 
 const appInput = ['resources/css/app.css', 'resources/js/app.js']
 
@@ -342,6 +343,133 @@ test('the dev server index page ends the response', async () => {
         assert.deepEqual(reached, ['/not-served.txt'])
     } finally {
         await server.close()
+    }
+})
+
+/** A resolved config as the URL resolver reads it, with a logger that records warnings. */
+function serverConfig(server = {}) {
+    const warnings = []
+
+    return {
+        warnings,
+        config: {
+            server: { host: false, hmr: true, https: undefined, origin: undefined, ...server },
+            logger: { warn: (message) => warnings.push(message) },
+        },
+    }
+}
+
+const bound = (address, port = 5173, family = address.includes(':') ? 'IPv6' : 'IPv4') => ({ address, port, family })
+
+test('the dev server URL names the bound address, except where a browser cannot use it', () => {
+    const url = (address, server) => resolveDevServerUrl(address, serverConfig(server).config)
+
+    assert.equal(url(bound('127.0.0.1')), 'http://127.0.0.1:5173')
+    assert.equal(url(bound('192.168.1.5')), 'http://192.168.1.5:5173')
+    assert.equal(url(bound('fe80::1')), 'http://[fe80::1]:5173')
+    assert.equal(url({ address: 'fe80::1', port: 5173, family: 6 }), 'http://[fe80::1]:5173', 'old node reported the family as a number')
+
+    // A wildcard or IPv6 loopback bind is not an address a browser can reach.
+    assert.equal(url(bound('0.0.0.0')), 'http://localhost:5173')
+    assert.equal(url(bound('::')), 'http://localhost:5173')
+    assert.equal(url(bound('::1')), 'http://localhost:5173')
+
+    // A host the config names wins, bracketed when it is IPv6 and skipped when it is a wildcard.
+    assert.equal(url(bound('0.0.0.0'), { host: '192.168.1.5' }), 'http://192.168.1.5:5173')
+    assert.equal(url(bound('0.0.0.0'), { hmr: { host: 'dev.example.test' } }), 'http://dev.example.test:5173')
+    assert.equal(url(bound('0.0.0.0'), { host: 'ignored.test', hmr: { host: 'dev.example.test' } }), 'http://dev.example.test:5173')
+    assert.equal(url(bound('0.0.0.0'), { hmr: { host: 'fe80::1' } }), 'http://[fe80::1]:5173')
+    assert.equal(url(bound('0.0.0.0'), { hmr: { host: '[fe80::1]' } }), 'http://[fe80::1]:5173')
+    assert.equal(url(bound('0.0.0.0'), { host: '0.0.0.0' }), 'http://localhost:5173')
+    assert.equal(url(bound('::'), { hmr: { host: '::' }, host: 'dev.example.test' }), 'http://dev.example.test:5173')
+    assert.equal(url(bound('0.0.0.0'), { host: '' }), 'http://localhost:5173')
+
+    // Protocol and port follow the HMR config, as the browser connects.
+    assert.equal(url(bound('127.0.0.1'), { https: {} }), 'https://127.0.0.1:5173')
+    assert.equal(url(bound('127.0.0.1'), { hmr: { protocol: 'wss', clientPort: 443, host: 'assets.test' } }), 'https://assets.test:443')
+})
+
+test('exposing the dev server to the network warns that the hot file says localhost', () => {
+    const { config, warnings } = serverConfig({ host: true })
+    resolveDevServerUrl(bound('0.0.0.0'), config)
+
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0], /bound to '0\.0\.0\.0'/)
+    assert.match(warnings[0], /server\.hmr\.host/)
+    assert.match(warnings[0], /server\.allowedHosts/)
+
+    // A named host silences it, and so does a bind that is not a wildcard.
+    const named = serverConfig({ host: true, hmr: { host: '192.168.1.5' } })
+    resolveDevServerUrl(bound('0.0.0.0'), named.config)
+    assert.deepEqual(named.warnings, [])
+
+    const loopback = serverConfig()
+    resolveDevServerUrl(bound('127.0.0.1'), loopback.config)
+    assert.deepEqual(loopback.warnings, [])
+})
+
+test('a server.origin of the user\'s own is trimmed, and refused unless it is an http(s) URL', () => {
+    const origin = (value) => {
+        const { config, warnings } = serverConfig({ origin: value })
+
+        return [configuredOrigin(config), warnings]
+    }
+
+    assert.deepEqual(origin(undefined), [undefined, []])
+    assert.deepEqual(origin('http://__goravel_vite_placeholder__.test'), [undefined, []], 'the placeholder is not an origin anyone configured')
+    assert.deepEqual(origin('https://assets.example.test'), ['https://assets.example.test', []])
+    assert.deepEqual(origin('http://localhost:5173/'), ['http://localhost:5173', []])
+    assert.deepEqual(origin('http://localhost:5173/vite/'), ['http://localhost:5173/vite', []], 'a path survives, as Vite treats it')
+
+    const [refused, warnings] = origin('localhost:5173')
+    assert.equal(refused, undefined)
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0], /'server\.origin' is 'localhost:5173'/)
+    assert.deepEqual(origin('ws://localhost:5173')[0], undefined)
+})
+
+test('a wildcard bind writes localhost to the hot file, and a configured origin writes itself', async () => {
+    const root = project({ 'resources/images/logo.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>' })
+
+    const serve = (server) =>
+        createServer({
+            configFile: false,
+            logLevel: 'silent',
+            root,
+            server: { port: 0, ...server },
+            plugins: goravel({ input: appInput, discover: false }),
+        })
+
+    const wildcard = await serve({ host: '0.0.0.0' })
+    try {
+        await wildcard.listen()
+        const { port } = wildcard.httpServer.address()
+
+        assert.equal(fs.readFileSync(path.join(root, 'public', 'hot'), 'utf8'), `http://localhost:${port}`)
+
+        const result = await wildcard.transformRequest('/resources/images/logo.svg?import')
+        assert.match(result.code, new RegExp(`http://localhost:${port}/resources/images/logo.svg`))
+    } finally {
+        await wildcard.close()
+    }
+
+    // The trailing slash stays out of the hot file; the application appends the paths itself.
+    const origin = await serve({ host: '127.0.0.1', origin: 'http://assets.test:5173/' })
+    try {
+        await origin.listen()
+        assert.equal(fs.readFileSync(path.join(root, 'public', 'hot'), 'utf8'), 'http://assets.test:5173')
+    } finally {
+        await origin.close()
+    }
+
+    // An origin that is not a URL is ignored in favour of the bound address.
+    const refused = await serve({ host: '127.0.0.1', origin: 'assets.test:5173' })
+    try {
+        await refused.listen()
+        const { port } = refused.httpServer.address()
+        assert.equal(fs.readFileSync(path.join(root, 'public', 'hot'), 'utf8'), `http://127.0.0.1:${port}`)
+    } finally {
+        await refused.close()
     }
 })
 
