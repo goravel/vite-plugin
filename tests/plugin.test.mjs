@@ -217,6 +217,48 @@ test('the dev server announces itself in the hot file', async () => {
     }
 })
 
+test('the dev server index page ends the response', async () => {
+    const root = project({ '.env': 'APP_URL=http://localhost:3000\n' })
+    const reached = []
+
+    // A middleware behind the plugin's: it must not run for a response the plugin ended.
+    const after = {
+        name: 'after',
+        enforce: 'post',
+        configureServer: (server) => () =>
+            server.middlewares.use((req, _res, next) => {
+                reached.push(req.url)
+                next()
+            }),
+    }
+
+    const server = await createServer({
+        configFile: false,
+        logLevel: 'silent',
+        root,
+        server: { host: '127.0.0.1', port: 0 },
+        plugins: [goravel({ input: appInput, discover: false }), after],
+    })
+
+    try {
+        await server.listen()
+
+        const { port } = server.httpServer.address()
+
+        const index = await fetch(`http://127.0.0.1:${port}/index.html`)
+        assert.equal(index.status, 404)
+        assert.match(await index.text(), /href="http:\/\/localhost:3000"/)
+
+        // Not asking for HTML, so Vite's fallback does not rewrite the URL to /index.html.
+        const other = await fetch(`http://127.0.0.1:${port}/not-served.txt`, { headers: { accept: 'application/json' } })
+        assert.equal(other.status, 404)
+
+        assert.deepEqual(reached, ['/not-served.txt'])
+    } finally {
+        await server.close()
+    }
+})
+
 test('a hot file of your own and transformOnServe', async () => {
     const root = project()
     const seen = []

@@ -203,6 +203,8 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
                     if (req.url === '/index.html') {
                         res.statusCode = 404
                         res.end(devServerIndex(appUrl))
+
+                        return
                     }
 
                     next()
