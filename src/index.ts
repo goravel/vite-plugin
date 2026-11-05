@@ -5,6 +5,7 @@ import { globSync } from 'tinyglobby'
 import { createLogger, loadEnv, version as viteVersion, type ConfigEnv, type Plugin, type ResolvedConfig, type UserConfig } from 'vite'
 import fullReload from 'vite-plugin-full-reload'
 import {
+    defaultManifest,
     refreshPaths,
     resolvePaths,
     resolvePluginConfig,
@@ -157,8 +158,20 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
             // the dev server serves whatever the page asks for, so only a build needs the entries.
             const discovered = pluginConfig.discover ? (pluginConfig.discovered ?? runDiscovery(pluginConfig, root)) : null
             paths = resolvePaths(pluginConfig, discovered, root)
+            // Entries the user named in the Vite config are built as written; the plugin's are then ignored.
+            const userNamedTheEntries = userInputKey(userConfig) !== undefined
+            if (command === 'build' && userNamedTheEntries) {
+                logger.warn(
+                    `${userInputKey(userConfig)} is set in your Vite config, so it is built as written and the plugin's 'input' is ignored, ` +
+                        'along with the entries discovered from the views. Name the entries in one place or the other.',
+                    { timestamp: true },
+                )
+            }
             // Absolute, so Rollup (Vite 7) finds the entries under a root that is not the working directory.
-            const input = absoluteInput(command === 'build' ? resolveBuildInput(pluginConfig, discovered, assets) : (pluginConfig.input ?? []), root)
+            const input = absoluteInput(
+                command === 'build' ? resolveBuildInput(pluginConfig, discovered, assets, userNamedTheEntries) : (pluginConfig.input ?? []),
+                root,
+            )
 
             return {
                 base: userConfig.base ?? (command === 'build' ? resolveBase(userBuildDirectory(userConfig, paths, root) ?? paths.buildDirectory, assetUrl) : ''),
@@ -208,6 +221,10 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
         },
         configResolved(config) {
             resolvedConfig = config
+
+            if (config.command === 'build') {
+                warnAboutTheManifest(config, paths)
+            }
 
             // An origin of the user's own is the URL from the start, before (or without) a server listening.
             origin = configuredOrigin(config)
@@ -315,7 +332,49 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
 }
 
 /** The build entries: `input` plus the discovered ones. Discovered assets go into the set. */
-function resolveBuildInput(pluginConfig: ResolvedPluginConfig, discovered: DiscoveredInputs | null, assets: Set<string>): InputOption {
+/**
+ * Warns when Vite writes its manifest under a name the application does not read. The
+ * directory is the build directory's concern, warned about where the base is derived.
+ */
+function warnAboutTheManifest(config: ResolvedConfig, paths: ResolvedPaths): void {
+    const readFrom = path.join(config.root, config.build.outDir, paths.manifest)
+
+    if (config.build.manifest === false) {
+        logger.warn(
+            `build.manifest is false, so Vite writes no manifest, and the application resolves every asset it renders through one: it expects to read "${readFrom}".`,
+            { timestamp: true },
+        )
+
+        return
+    }
+
+    const written = config.build.manifest === true ? defaultManifest : config.build.manifest
+
+    if (path.normalize(written) !== path.normalize(paths.manifest)) {
+        logger.warn(
+            `Vite writes its manifest to "${path.join(config.root, config.build.outDir, written)}", but the application reads it from "${readFrom}" ` +
+                'and will report the build as missing. Drop build.manifest from your Vite config, or set vite.manifest in config/vite.go to the file Vite writes.',
+            { timestamp: true },
+        )
+    }
+}
+
+/** The key under which the user named the entries in the Vite config, if they did. */
+function userInputKey(userConfig: UserConfig): 'build.rolldownOptions.input' | 'build.rollupOptions.input' | undefined {
+    if (userConfig.build?.rolldownOptions?.input !== undefined) {
+        return 'build.rolldownOptions.input'
+    }
+
+    return userConfig.build?.rollupOptions?.input !== undefined ? 'build.rollupOptions.input' : undefined
+}
+
+/** @param userNamedTheEntries - The user's own entries are built instead, so having none here is no error. */
+function resolveBuildInput(
+    pluginConfig: ResolvedPluginConfig,
+    discovered: DiscoveredInputs | null,
+    assets: Set<string>,
+    userNamedTheEntries: boolean,
+): InputOption {
     if (discovered === null) {
         return pluginConfig.input ?? []
     }
@@ -333,7 +392,7 @@ function resolveBuildInput(pluginConfig: ResolvedPluginConfig, discovered: Disco
 
     const input = mergeInput(pluginConfig.input, discovered.inputs)
 
-    if (Array.isArray(input) ? input.length === 0 : typeof input === 'object' && Object.keys(input).length === 0) {
+    if (!userNamedTheEntries && (Array.isArray(input) ? input.length === 0 : typeof input === 'object' && Object.keys(input).length === 0)) {
         throw new Error(
             'goravel-vite-plugin: nothing to build. No view calls {{ vite ... }} with a constant entry point and no "input" is configured.',
         )

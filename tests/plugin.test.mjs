@@ -167,6 +167,64 @@ test("the user's own configuration wins", async () => {
     assert.equal(config.server.origin, 'http://example.test:5173')
 })
 
+/** Runs the body with the plugin's own warnings collected, which it prints through console.warn. */
+async function warningsOf(body) {
+    const warnings = []
+    const warn = console.warn
+    console.warn = (...args) => warnings.push(args.join(' '))
+
+    try {
+        await body()
+    } finally {
+        console.warn = warn
+    }
+
+    return warnings
+}
+
+test('a manifest the application does not read is warned about', async () => {
+    const root = project()
+    const plugins = () => goravel({ input: appInput, discover: false })
+
+    const none = await warningsOf(() => resolve(root, plugins(), { build: { manifest: false } }))
+    assert.equal(none.length, 1)
+    assert.match(none[0], /build\.manifest is false/)
+    assert.match(none[0], /public[\\/]build[\\/]\.vite[\\/]manifest\.json/)
+
+    const elsewhere = await warningsOf(() => resolve(root, plugins(), { build: { manifest: 'assets.json' } }))
+    assert.equal(elsewhere.length, 1)
+    assert.match(elsewhere[0], /writes its manifest to ".*assets\.json"/)
+    assert.match(elsewhere[0], /vite\.manifest/)
+
+    // The application's own name, spelled out, and the dev server, are no reason to warn.
+    assert.deepEqual(await warningsOf(() => resolve(root, plugins(), { build: { manifest: '.vite/manifest.json' } })), [])
+    assert.deepEqual(await warningsOf(() => resolve(root, plugins(), { build: { manifest: true } })), [])
+    assert.deepEqual(await warningsOf(() => resolve(root, plugins())), [])
+    assert.deepEqual(await warningsOf(() => resolve(root, plugins(), { build: { manifest: false } }, 'serve')), [])
+})
+
+test("entries named in the Vite config are built as written, and said to be", async () => {
+    const root = project({ 'resources/js/other.js': 'export const other = 1\n' })
+    const key = (config) => Object.keys(config.build).find((option) => option === 'rolldownOptions' || option === 'rollupOptions')
+
+    let config
+    const warnings = await warningsOf(async () => {
+        config = await resolve(root, goravel({ input: appInput, discover: false }), { build: { [key(await resolve(root, []))]: { input: 'resources/js/other.js' } } })
+    })
+    assert.deepEqual(inputOf(config), 'resources/js/other.js')
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0], /build\.(rolldown|rollup)Options\.input is set/)
+    assert.match(warnings[0], /discovered from the views/)
+
+    // Nor is there anything to complain about when the views name nothing: the user's entries are the build.
+    const discovered = { inputs: [], assets: [], paths: { public_directory: 'public', build_directory: 'build', hot_file: 'public/hot', manifest: '.vite/manifest.json' } }
+    const named = await resolve(root, goravel({ discovered }), { build: { [key(config)]: { input: 'resources/js/other.js' } } })
+    assert.deepEqual(inputOf(named), 'resources/js/other.js')
+
+    // The dev server builds nothing, so it says nothing.
+    assert.deepEqual(await warningsOf(() => resolve(root, goravel({ input: appInput, discover: false }), { build: { [key(config)]: { input: 'resources/js/other.js' } } }, 'serve')), [])
+})
+
 test('aliases @ to resources/js unless the user says otherwise', async () => {
     const root = project()
 

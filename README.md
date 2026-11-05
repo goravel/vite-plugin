@@ -90,7 +90,7 @@ config.Add("vite", map[string]any{
 })
 ```
 
-The `publicDirectory`, `buildDirectory` and `hotFile` options exist for the case where the plugin cannot ask, or has to disagree. Vite's own `build.manifest` and `build.outDir` win over everything, as usual, but the application reads only `config/vite.go`: a `build.outDir` of your own moves the build and its URLs, and the plugin warns, because the framework keeps reading from `vite.build_directory`. Set that instead.
+The `publicDirectory`, `buildDirectory` and `hotFile` options exist for the case where the plugin cannot ask, or has to disagree. Vite's own `build.manifest` and `build.outDir` win over everything, as usual, but the application reads only `config/vite.go`: a `build.outDir` of your own moves the build and its URLs, and a `build.manifest` of your own renames the manifest, and the plugin warns about either, because the framework keeps reading from `vite.build_directory` and `vite.manifest`. Set those instead. Likewise a `build.rollupOptions.input` (or `rolldownOptions.input` on Vite 8) of your own is built as written, and the plugin's `input` and the discovered entries are ignored; the plugin says so.
 
 The command runs in Vite's `root`, which is the project root unless `vite.config.js` moves it, so the paths it reports and the entries it finds are relative to the same directory the framework uses.
 
