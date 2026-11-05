@@ -612,6 +612,71 @@ test('each dev server removes its own hot file when it closes', async () => {
     assert.equal(fs.existsSync(path.join(root, 'storage/first.hot')), false)
 })
 
+test('a closing server leaves a hot file another server has since written', async () => {
+    // Two dev servers for one project: the second took the hot file over, and the first must not delete it on its way out.
+    const root = project()
+
+    const serve = () =>
+        createServer({
+            configFile: false,
+            logLevel: 'silent',
+            root,
+            server: { host: '127.0.0.1', port: 0 },
+            plugins: goravel({ input: appInput, discover: false }),
+        })
+
+    const hotFile = path.join(root, 'public', 'hot')
+    const first = await serve()
+    const second = await serve()
+
+    try {
+        await first.listen()
+        await second.listen()
+        const secondUrl = `http://127.0.0.1:${second.httpServer.address().port}`
+        assert.equal(fs.readFileSync(hotFile, 'utf8'), secondUrl)
+
+        await first.close()
+        assert.equal(fs.readFileSync(hotFile, 'utf8'), secondUrl, 'the first server does not own the hot file any more')
+
+        await second.close()
+        assert.equal(fs.existsSync(hotFile), false)
+    } finally {
+        await first.close()
+        await second.close()
+    }
+})
+
+test('a hot file that cannot be written is reported, not thrown', async () => {
+    // A directory where the file should be: the server keeps serving, and the error says what to set.
+    const root = project({ 'storage/hot/.keep': '' })
+    const errors = []
+
+    const server = await createServer({
+        configFile: false,
+        customLogger: { ...silentLogger, error: (message) => errors.push(message) },
+        root,
+        server: { host: '127.0.0.1', port: 0 },
+        plugins: goravel({ input: appInput, discover: false, hotFile: 'storage/hot' }),
+    })
+
+    try {
+        await server.listen()
+        const { port } = server.httpServer.address()
+
+        assert.equal(errors.length, 1)
+        assert.match(errors[0], /could not write the hot file at '.*storage[\\/]hot'/)
+        assert.match(errors[0], /vite\.hot_file/)
+
+        // Still serving, and the served code still knows the URL.
+        const result = await server.transformRequest('/resources/js/greet.js')
+        assert.match(result.code, /hello/)
+        assert.equal((await fetch(`http://127.0.0.1:${port}/resources/css/app.css`)).status, 200)
+        assert.ok(fs.statSync(path.join(root, 'storage', 'hot')).isDirectory(), 'the directory is left alone')
+    } finally {
+        await server.close()
+    }
+})
+
 test('refresh: true watches the view, language and route directories that exist', () => {
     const root = project()
 

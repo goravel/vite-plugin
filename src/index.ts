@@ -39,15 +39,52 @@ export { refreshPaths }
 
 const logger = createLogger('info', { prefix: '[goravel-vite-plugin]' })
 
-/** The hot files of the dev servers running in this process, removed when the process exits. */
-const hotFiles = new Set<string>()
+/** The hot files of the dev servers running in this process, and what each wrote, removed when the process exits. */
+const hotFiles = new Map<string, string>()
 let exitHandlersBound = false
 
-function removeHotFile(hotFile: string): void {
-    hotFiles.delete(hotFile)
+/** Writes the hot file, creating its directory; a failure is reported rather than thrown, since the server is already listening. */
+function claimHotFile(hotFile: string, content: string, viteLogger: ResolvedConfig['logger']): boolean {
+    try {
+        const directory = path.dirname(hotFile)
+        const created = !fs.existsSync(directory)
+        fs.mkdirSync(directory, { recursive: true })
+        fs.writeFileSync(hotFile, content)
 
-    if (fs.existsSync(hotFile)) {
-        fs.rmSync(hotFile)
+        if (created) {
+            const realpath = fs.realpathSync(directory)
+            setTimeout(() => {
+                logger.info(`Hot file directory created ${colors.dim(realpath)}`, { clear: true, timestamp: true })
+            }, 200)
+        }
+    } catch (error) {
+        viteLogger.error(
+            colors.red(
+                `goravel-vite-plugin: could not write the hot file at '${hotFile}': ${(error as Error).message}. ` +
+                    'The application reads it to find the dev server, and renders the build until it can. Set vite.hot_file to a path it can write.',
+            ),
+        )
+
+        return false
+    }
+
+    hotFiles.set(hotFile, content)
+
+    return true
+}
+
+/** Removes the hot file, unless another server has since written its own URL into it. */
+function releaseHotFile(hotFile: string, content: string): void {
+    if (hotFiles.get(hotFile) === content) {
+        hotFiles.delete(hotFile)
+    }
+
+    try {
+        if (fs.readFileSync(hotFile, 'utf8') === content) {
+            fs.rmSync(hotFile)
+        }
+    } catch {
+        // Already gone, or never written.
     }
 }
 
@@ -231,17 +268,11 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
                 const viteDevServerUrl = origin ?? resolveDevServerUrl(address, server.config)
                 setDevServerUrl(viteDevServerUrl)
 
-                const hotFileParentDirectory = path.dirname(paths.hotFile)
-                if (!fs.existsSync(hotFileParentDirectory)) {
-                    fs.mkdirSync(hotFileParentDirectory, { recursive: true })
-                    const created = fs.realpathSync(hotFileParentDirectory)
-                    setTimeout(() => {
-                        logger.info(`Hot file directory created ${colors.dim(created)}`, { clear: true, timestamp: true })
-                    }, 200)
-                }
+                const hotFileContent = `${viteDevServerUrl}${server.config.base.replace(/\/$/, '')}`
+                claimHotFile(paths.hotFile, hotFileContent, server.config.logger)
 
-                fs.writeFileSync(paths.hotFile, `${viteDevServerUrl}${server.config.base.replace(/\/$/, '')}`)
-                hotFiles.add(paths.hotFile)
+                // A closed server no longer serves anything, so its hot file goes with it.
+                server.httpServer?.once('close', () => releaseHotFile(paths.hotFile, hotFileContent))
 
                 setTimeout(() => {
                     server.config.logger.info(
@@ -254,14 +285,11 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
                 }, 100)
             })
 
-            // A closed server no longer serves anything, so its hot file goes with it.
-            server.httpServer?.once('close', () => removeHotFile(paths.hotFile))
-
-            // Bound once for the process; every running server's hot file is in the set.
+            // Bound once for the process; every running server's hot file is in the map.
             if (!exitHandlersBound) {
                 process.on('exit', () => {
-                    for (const hotFile of hotFiles) {
-                        removeHotFile(hotFile)
+                    for (const [hotFile, content] of [...hotFiles]) {
+                        releaseHotFile(hotFile, content)
                     }
                 })
                 process.on('SIGINT', () => process.exit())
