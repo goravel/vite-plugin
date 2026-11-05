@@ -79,7 +79,6 @@ export function goravel(config: string | string[] | PluginConfig = {}): [Goravel
 
 /** @param assets - The `assets` option; discovery adds to the set before the assets plugin reads it. */
 function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<string>): GoravelPlugin {
-    let viteDevServerUrl: DevServerUrl
     let resolvedConfig: ResolvedConfig
     let userConfig: UserConfig
     let paths: ResolvedPaths
@@ -87,6 +86,20 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
     const defaultAliases: Record<string, string> = {
         '@': '/resources/js',
     }
+
+    // The URL the browser reaches the dev server at, known once it listens (or from
+    // server.origin); undefined where there is no server of its own to listen.
+    let devServerUrl: Promise<DevServerUrl | undefined>
+    let setDevServerUrl: (url: DevServerUrl | undefined) => void
+    const awaitDevServerUrl = (): void => {
+        devServerUrl = new Promise((resolve) => {
+            setDevServerUrl = resolve
+        })
+    }
+    awaitDevServerUrl()
+    let warnedUnknownUrl = false
+
+    const userOrigin = (): DevServerUrl | undefined => (userConfig.server?.origin ? (userConfig.server.origin as DevServerUrl) : undefined)
 
     return {
         name: 'goravel',
@@ -159,29 +172,64 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
             resolvedConfig = config
 
             // An origin of the user's own is the URL from the start, before (or without) a server listening.
-            if (userConfig.server?.origin) {
-                viteDevServerUrl = userConfig.server.origin as DevServerUrl
+            const origin = userOrigin()
+            if (origin) {
+                setDevServerUrl(origin)
             }
         },
-        transform(code) {
-            // Until the URL is known there is nothing to put in place of the placeholder (middleware mode never knows it).
-            if (resolvedConfig.command === 'serve' && viteDevServerUrl) {
-                code = code.replaceAll(placeholderOrigin, viteDevServerUrl)
-
-                return pluginConfig.transformOnServe(code, viteDevServerUrl)
+        async transform(code) {
+            if (resolvedConfig.command !== 'serve') {
+                return
             }
+
+            // Vite warms files up before the server listens; those wait here rather than keep the placeholder.
+            const url = await devServerUrl
+
+            if (url === undefined) {
+                // No server of its own (middleware mode), so no origin to put in: the URLs stay relative to the page.
+                if (!code.includes(placeholderOrigin)) {
+                    return
+                }
+
+                if (!warnedUnknownUrl) {
+                    warnedUnknownUrl = true
+                    resolvedConfig.logger.warn(
+                        colors.yellow(
+                            'goravel-vite-plugin: the dev server URL is unknown, so asset URLs are left relative to the page that loads them. ' +
+                                "Set 'server.origin' to the URL Vite is reachable at.",
+                        ),
+                    )
+                }
+
+                return code.replaceAll(placeholderOrigin, '')
+            }
+
+            return pluginConfig.transformOnServe(code.replaceAll(placeholderOrigin, url), url)
         },
         configureServer(server) {
             const appUrl = loadEnv(resolvedConfig.mode, resolvedConfig.envDir, 'APP_URL').APP_URL ?? 'undefined'
+            const origin = userOrigin()
+
+            // A restarted server binds anew, unless the origin was configured.
+            if (!origin) {
+                awaitDevServerUrl()
+            }
+
+            if (!server.httpServer) {
+                setDevServerUrl(origin)
+            }
 
             server.httpServer?.once('listening', () => {
                 const address = server.httpServer?.address()
 
                 if (typeof address !== 'object' || address === null) {
+                    setDevServerUrl(origin)
+
                     return
                 }
 
-                viteDevServerUrl ??= resolveDevServerUrl(address, server.config)
+                const viteDevServerUrl = origin ?? resolveDevServerUrl(address, server.config)
+                setDevServerUrl(viteDevServerUrl)
 
                 const hotFileParentDirectory = path.dirname(paths.hotFile)
                 if (!fs.existsSync(hotFileParentDirectory)) {

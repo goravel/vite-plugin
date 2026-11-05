@@ -46,6 +46,17 @@ function project(files = {}) {
     return fs.realpathSync(root)
 }
 
+/** A Vite logger that says nothing; a test replaces the method it listens to. */
+const silentLogger = {
+    info() {},
+    warn() {},
+    warnOnce() {},
+    error() {},
+    clearScreen() {},
+    hasErrorLogged: () => false,
+    hasWarned: false,
+}
+
 function write(root, files) {
     for (const [file, content] of Object.entries(files)) {
         fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true })
@@ -334,6 +345,35 @@ test('the dev server index page ends the response', async () => {
     }
 })
 
+test('a transform that starts before the server listens waits for its URL', async () => {
+    // Vite warms files up before the server is listening; the placeholder must not be left in them.
+    const root = project({ 'resources/images/logo.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>' })
+
+    const server = await createServer({
+        configFile: false,
+        logLevel: 'silent',
+        root,
+        server: { host: '127.0.0.1', port: 0 },
+        plugins: goravel({ input: appInput, discover: false }),
+    })
+
+    try {
+        const pending = server.transformRequest('/resources/images/logo.svg?import')
+        let settled = false
+        pending.then(() => (settled = true))
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        assert.equal(settled, false, 'it cannot answer before the URL is known')
+
+        await server.listen()
+        const { port } = server.httpServer.address()
+        const result = await pending
+        assert.match(result.code, new RegExp(`http://127\\.0\\.0\\.1:${port}/resources/images/logo.svg`))
+        assert.doesNotMatch(result.code, /__goravel_vite_placeholder__/)
+    } finally {
+        await server.close()
+    }
+})
+
 test('a hot file of your own and transformOnServe', async () => {
     const root = project()
     const seen = []
@@ -372,10 +412,10 @@ test('in middleware mode the URL comes from server.origin, or stays unknown', as
     const root = project({ 'resources/images/logo.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>' })
     const seen = []
 
-    const serve = (server) =>
+    const serve = (server, logger) =>
         createServer({
             configFile: false,
-            logLevel: 'silent',
+            ...(logger ? { customLogger: { ...silentLogger, ...logger } } : { logLevel: 'silent' }),
             root,
             server: { middlewareMode: true, ...server },
             plugins: goravel({
@@ -388,13 +428,16 @@ test('in middleware mode the URL comes from server.origin, or stays unknown', as
             }),
         })
 
-    // Vite has no server of its own, so the plugin cannot know a URL; it leaves the code alone rather than writing "undefined".
-    const unknown = await serve({})
+    // Vite has no server of its own, so the plugin cannot know a URL; the asset URLs stay relative to the page, and it says so.
+    const warnings = []
+    const unknown = await serve({}, { warn: (message) => warnings.push(message) })
     try {
         const result = await unknown.transformRequest('/resources/images/logo.svg?import')
-        assert.match(result.code, /__goravel_vite_placeholder__/)
+        assert.match(result.code, /"\/resources\/images\/logo\.svg(\?import)?"/)
+        assert.doesNotMatch(result.code, /__goravel_vite_placeholder__/)
         assert.doesNotMatch(result.code, /undefined/)
         assert.deepEqual(seen, [])
+        assert.equal(warnings.filter((message) => message.includes('dev server URL is unknown')).length, 1)
     } finally {
         await unknown.close()
     }
