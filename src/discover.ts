@@ -28,10 +28,21 @@ export interface DiscoveredPaths {
 /** Artisan through `go run`. */
 export const defaultDiscoverCommand: string[] = ['go', 'run', '.', 'artisan', 'vite:inputs']
 
+/** Five minutes: enough for `go run` to download the modules and compile the application. */
+export const defaultDiscoverTimeout = 300_000
+
 /** Runs the command in the project root and parses the JSON object on its last line. */
-export function discoverInputs(command: string[], root: string): DiscoveredInputs {
+export function discoverInputs(command: string[], root: string, timeout: number = defaultDiscoverTimeout): DiscoveredInputs {
     const [executable, ...args] = command
-    const result = spawnSync(executable, args, { cwd: root, encoding: 'utf8', env: process.env })
+    const result = spawnSync(executable, args, { cwd: root, encoding: 'utf8', env: process.env, timeout })
+
+    if (result.error && 'code' in result.error && result.error.code === 'ETIMEDOUT') {
+        throw new Error(
+            `goravel-vite-plugin: "${command.join(' ')}" did not finish within ${timeout / 1000}s. ` +
+                "Raise the 'discoverTimeout' option if the application takes longer to start. " +
+                explainAlternatives(),
+        )
+    }
 
     if (result.error) {
         throw new Error(

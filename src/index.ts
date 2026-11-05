@@ -249,7 +249,7 @@ function resolveBuildInput(pluginConfig: ResolvedPluginConfig, discovered: Disco
 function runDiscovery(pluginConfig: ResolvedPluginConfig, root: string): DiscoveredInputs {
     logger.info(`Asking the application for its paths and entry points with "${pluginConfig.discoverCommand.join(' ')}"`, { timestamp: true })
 
-    return discoverInputs(pluginConfig.discoverCommand, root)
+    return discoverInputs(pluginConfig.discoverCommand, root, pluginConfig.discoverTimeout)
 }
 
 /** Adds the discovered entries to `input` without changing its shape or repeating an entry. */

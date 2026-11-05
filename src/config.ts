@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import type { Config as FullReloadConfig } from 'vite-plugin-full-reload'
-import { defaultDiscoverCommand, validateInputs, type DiscoveredInputs } from './discover.js'
+import { defaultDiscoverCommand, defaultDiscoverTimeout, validateInputs, type DiscoveredInputs } from './discover.js'
 
 /** The framework's default manifest path, used when the application reports none. */
 export const defaultManifest = '.vite/manifest.json'
@@ -35,6 +35,14 @@ export interface PluginConfig {
      * @default ['go', 'run', '.', 'artisan', 'vite:inputs']
      */
     discoverCommand?: string | string[]
+
+    /**
+     * How long to wait for the discovery command, in milliseconds. `go run` compiles the
+     * application first, which takes a while on a cold cache.
+     *
+     * @default 300000
+     */
+    discoverTimeout?: number
 
     /** The output of `artisan vite:inputs`, for builds that cannot run the application. When given, the command is not run. */
     discovered?: DiscoveredInputs
@@ -85,6 +93,7 @@ export interface ResolvedPluginConfig {
     input: InputOption | undefined
     discover: boolean
     discoverCommand: string[]
+    discoverTimeout: number
     discovered: DiscoveredInputs | null
     /** As the options set them; undefined where the application decides. The hot file is resolved against the root by `resolvePaths`. */
     publicDirectory: string | undefined
@@ -135,10 +144,17 @@ export function resolvePluginConfig(config: string | string[] | PluginConfig | u
         throw new Error('goravel-vite-plugin: discoverCommand must name a command.')
     }
 
+    const discoverTimeout = config.discoverTimeout ?? defaultDiscoverTimeout
+
+    if (!Number.isFinite(discoverTimeout) || discoverTimeout <= 0) {
+        throw new Error('goravel-vite-plugin: discoverTimeout must be a number of milliseconds greater than zero.')
+    }
+
     return {
         input: config.input,
         discover,
         discoverCommand,
+        discoverTimeout,
         discovered: config.discovered ? validateInputs(config.discovered) : null,
         publicDirectory: subdirectory(config.publicDirectory, 'publicDirectory'),
         buildDirectory: subdirectory(config.buildDirectory, 'buildDirectory'),

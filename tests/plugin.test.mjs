@@ -341,6 +341,9 @@ test('rejects malformed options', async () => {
     assert.throws(() => resolvePluginConfig(undefined, '/app'), /missing configuration/)
     assert.throws(() => resolvePluginConfig({ discover: false }, '/app'), /missing configuration for "input", and discovery is off/)
     assert.throws(() => resolvePluginConfig({ discoverCommand: ' ' }, '/app'), /discoverCommand must name a command/)
+    assert.throws(() => resolvePluginConfig({ discoverTimeout: 0 }, '/app'), /discoverTimeout must be a number of milliseconds/)
+    assert.equal(resolvePluginConfig({}, '/app').discoverTimeout, 300_000)
+    assert.equal(resolvePluginConfig({ discoverTimeout: 1000 }, '/app').discoverTimeout, 1000)
     assert.throws(() => resolvePluginConfig({ discovered: { inputs: 'a.js' } }, '/app'), /discovered inputs must look like/)
     assert.deepEqual(resolvePluginConfig({}, '/app').discoverCommand, ['go', 'run', '.', 'artisan', 'vite:inputs'])
     assert.deepEqual(resolvePluginConfig({ discoverCommand: './main artisan vite:inputs' }, '/app').discoverCommand, ['./main', 'artisan', 'vite:inputs'])
@@ -362,13 +365,14 @@ test('rejects malformed options', async () => {
  * A stand-in for `go run . artisan vite:inputs`: a Node script that prints the
  * given JSON, and logs each call so a test can see whether it was asked.
  */
-function fakeArtisan(root, output, { exitCode = 0, prefix = '' } = {}) {
+function fakeArtisan(root, output, { exitCode = 0, prefix = '', hang = false } = {}) {
     write(root, {
         'artisan.cjs':
             `require('node:fs').appendFileSync(${JSON.stringify(path.join(root, 'calls.log'))}, process.argv.slice(2).join(' ') + '\\n')\n` +
             (prefix ? `console.log(${JSON.stringify(prefix)})\n` : '') +
+            (hang ? 'setInterval(() => {}, 1000)\n' : '') +
             `console.log(${JSON.stringify(typeof output === 'string' ? output : JSON.stringify(output))})\n` +
-            `process.exit(${exitCode})\n`,
+            (hang ? '' : `process.exit(${exitCode})\n`),
     })
 
     return [process.execPath, 'artisan.cjs', 'vite:inputs']
@@ -607,6 +611,12 @@ test('explains a failing or silent discovery command', async () => {
     await assert.rejects(
         () => resolve(root, goravel({ discoverCommand: [path.join(root, 'does-not-exist')] })),
         /could not run/,
+    )
+
+    // A command that never exits is given up on, even after it printed the JSON.
+    await assert.rejects(
+        () => resolve(root, goravel({ discoverCommand: fakeArtisan(root, discovered, { hang: true }), discoverTimeout: 500 })),
+        /did not finish within 0\.5s.*discoverTimeout/,
     )
 
     await assert.rejects(
