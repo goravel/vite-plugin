@@ -10,6 +10,7 @@ Vite plugin for [Goravel](https://www.goravel.dev) applications. It is the count
 - The entry points are discovered from your views: whatever `{{ vite ... }}` and `{{ viteAsset ... }}` ask for is built, so the list is not kept twice.
 - The paths are the framework's: the plugin asks the application where it reads the build and the hot file, so `config/vite.go` is the only place they are set.
 - `vite` (the dev server) writes its URL to `public/hot`; as long as that file exists, `{{ vite ... }}` points every tag at the dev server and you get hot module replacement.
+- The dev server answers every origin, so the fonts, images and modules a page loads from it are not blocked wherever the application is served from. Set `server.cors` yourself to narrow it.
 - With `refresh: true`, the page reloads when a view, language or route file changes.
 - `@` resolves to `resources/js`.
 

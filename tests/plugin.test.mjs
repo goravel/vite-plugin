@@ -249,6 +249,49 @@ test('the dev server announces itself in the hot file', async () => {
     }
 })
 
+test('the dev server answers every origin', async () => {
+    // Fonts and module scripts are CORS requests, and Vite admits only localhost by default.
+    const root = project()
+
+    const serve = (server = {}) =>
+        createServer({
+            configFile: false,
+            logLevel: 'silent',
+            root,
+            server: { host: '127.0.0.1', port: 0, ...server },
+            plugins: goravel({ input: appInput, discover: false }),
+        })
+
+    const allowed = async (server, origin) => {
+        const { port } = server.httpServer.address()
+        const response = await fetch(`http://127.0.0.1:${port}/resources/css/app.css`, { headers: { origin, accept: 'text/css' } })
+        assert.equal(response.status, 200)
+
+        return response.headers.get('access-control-allow-origin')
+    }
+
+    const server = await serve()
+    try {
+        await server.listen()
+
+        assert.equal(await allowed(server, 'http://goravel.test:3000'), '*')
+        assert.equal(await allowed(server, 'http://192.168.1.5:8000'), '*')
+    } finally {
+        await server.close()
+    }
+
+    // A cors setting of the user's own is taken as given.
+    const own = await serve({ cors: { origin: ['http://elsewhere.test'] } })
+    try {
+        await own.listen()
+
+        assert.equal(await allowed(own, 'http://elsewhere.test'), 'http://elsewhere.test')
+        assert.equal(await allowed(own, 'http://goravel.test:3000'), null)
+    } finally {
+        await own.close()
+    }
+})
+
 test('the dev server index page ends the response', async () => {
     const root = project({ '.env': 'APP_URL=http://localhost:3000\n' })
     const reached = []

@@ -123,6 +123,8 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
                 },
                 server: {
                     origin: userConfig.server?.origin ?? placeholderOrigin,
+                    // Fonts and modules are fetched in CORS mode from wherever the application is served; Vite admits only localhost by default.
+                    cors: userConfig.server?.cors ?? true,
                     ...(serverConfig
                         ? {
                               host: userConfig.server?.host ?? serverConfig.host,
