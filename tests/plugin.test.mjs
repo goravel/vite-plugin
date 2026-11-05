@@ -132,6 +132,10 @@ test("a build.outDir of the user's own moves the URLs with it", async () => {
     assert.equal(outside.base, 'https://cdn.example.com/build/')
     const itself = await resolve(root, goravel({ input: appInput, discover: false }), { build: { outDir: 'public' } })
     assert.equal(itself.base, 'https://cdn.example.com/build/')
+
+    // The application's own directory, spelled out, is no reason to warn.
+    const same = await resolve(root, goravel({ input: appInput, discover: false }), { build: { outDir: './public/build/' } })
+    assert.equal(same.base, 'https://cdn.example.com/build/')
 })
 
 test("the user's own configuration wins", async () => {

@@ -317,7 +317,11 @@ function resolveBase(buildDirectory: string, assetUrl: string): string {
     return assetUrl + (!assetUrl.endsWith('/') ? '/' : '') + buildDirectory + '/'
 }
 
-/** Where a `build.outDir` of the user's own sits inside the public directory, so the URLs move with it; undefined (with a warning) when it does not. */
+/**
+ * Where a `build.outDir` of the user's own sits inside the public directory, so the
+ * URLs in the build match the files; undefined when it is outside. Either way the
+ * application reads only `vite.build_directory`, so a different directory is warned about.
+ */
 function userBuildDirectory(userConfig: UserConfig, paths: ResolvedPaths, root: string): string | undefined {
     const outDir = userConfig.build?.outDir
 
@@ -326,17 +330,18 @@ function userBuildDirectory(userConfig: UserConfig, paths: ResolvedPaths, root: 
     }
 
     const relative = path.relative(path.resolve(root, paths.publicDirectory), path.resolve(root, outDir))
+    const inside = relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)
+    const buildDirectory = inside ? relative.split(path.sep).join('/') : undefined
 
-    if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+    if (buildDirectory !== paths.buildDirectory) {
         logger.warn(
-            `build.outDir "${outDir}" is not a subdirectory of the public directory "${paths.publicDirectory}", so the application cannot serve it; the URLs assume "${paths.buildDirectory}".`,
+            `build.outDir "${outDir}" is not the application's build directory "${path.join(paths.publicDirectory, paths.buildDirectory)}", ` +
+                `where it reads the manifest from. Set vite.build_directory in config/vite.go instead.`,
             { timestamp: true },
         )
-
-        return undefined
     }
 
-    return relative.split(path.sep).join('/')
+    return buildDirectory
 }
 
 /** Emits the `assets` option and the discovered assets into the build, so they are versioned and in the manifest. */
