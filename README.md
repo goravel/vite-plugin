@@ -182,8 +182,10 @@ The tests run a real Vite build and dev server in a temporary directory. Node st
 ### Releasing
 
 1. Bump `version` in `package.json` and move the `Unreleased` entries in [CHANGELOG.md](CHANGELOG.md) under the new version.
-2. Commit, tag `vX.Y.Z` and push the tag.
-3. Run `pnpm publish`. It builds and runs the tests first.
+2. Commit, tag `vX.Y.Z` and push the tag. The [`publish`](.github/workflows/publish.yml) workflow builds, tests and publishes; a hyphenated version (`v0.2.0-beta.1`) goes to the `next` dist-tag instead of `latest`.
+3. To rehearse, run the workflow by hand and leave *dry run* on: it needs no credentials and publishes nothing.
+
+Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers), so no npm token is stored here. The trusted publisher on npmjs.com (organization `goravel`, repository `vite-plugin`, workflow `publish.yml`, no environment) can only be added once the package exists, so `0.1.0` goes out by hand and the workflow takes over from the next tag.
 
 ## Contributing
 
