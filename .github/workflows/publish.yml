@@ -21,26 +21,28 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
       # No registry-url on purpose: setup-node would write
       # //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}, which has no value
       # under OIDC and can break the token exchange. npm defaults to npmjs.org.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
 
       # Node 24.14 ships npm 11.11.0. Trusted publishing needs 11.5.1, and
-      # --tag under OIDC needs 11.21.0, so move to the latest CLI (12.x today).
+      # --tag under OIDC needs 11.21.0, so install the newest 12.2 CLI, which
+      # clears both floors; a range keeps a surprise major out of a release.
       - name: Use an npm that supports trusted publishing and dist-tags
         run: |
-          npm install --global npm@latest
+          npm install --global 'npm@^12.2.0'
           node --version
           npm --version
 
@@ -60,7 +62,7 @@ jobs:
 
       # prepublishOnly runs `npm run test`: tsc build (also type-checks) + node --test.
       - name: Publish
-        if: github.event_name == 'push' || inputs.dry_run == false
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
         run: |
           version=$(node -p "require('./package.json').version")
           tag=latest
