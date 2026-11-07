@@ -1,0 +1,78 @@
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Run npm publish --dry-run instead of publishing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      # No registry-url on purpose: setup-node would write
+      # //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}, which has no value
+      # under OIDC and can break the token exchange. npm defaults to npmjs.org.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Node 24.14 ships npm 11.11.0. Trusted publishing needs 11.5.1, and
+      # --tag under OIDC needs 11.21.0, so move to the latest CLI (12.x today).
+      - name: Use an npm that supports trusted publishing and dist-tags
+        run: |
+          npm install --global npm@latest
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # A tag that disagrees with package.json would publish a version nobody
+      # asked for: pluginVersion() ships package.json's version to the banner.
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match v$version in package.json"
+            exit 1
+          fi
+
+      # prepublishOnly runs `npm run test`: tsc build (also type-checks) + node --test.
+      - name: Publish
+        if: github.event_name == 'push' || inputs.dry_run == false
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag=latest
+          case "$version" in *-*) tag=next ;; esac
+          npm publish --tag "$tag"
+
+      # No credentials and no upload: dry-run only packs. It needs no token,
+      # and it still runs prepublishOnly, so build and tests are exercised.
+      - name: Publish (dry run)
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag=latest
+          case "$version" in *-*) tag=next ;; esac
+          npm publish --dry-run --tag "$tag"

@@ -182,8 +182,12 @@ The tests run a real Vite build and dev server in a temporary directory. Node st
 ### Releasing
 
 1. Bump `version` in `package.json` and move the `Unreleased` entries in [CHANGELOG.md](CHANGELOG.md) under the new version.
-2. Commit, tag `vX.Y.Z` and push the tag.
-3. Run `pnpm publish`. It builds and runs the tests first.
+2. Commit, tag `vX.Y.Z` and push the tag. The [`publish`](.github/workflows/publish.yml) workflow does the rest: `npm publish` builds and runs the tests first, then uploads the package. A tag that does not match the version in `package.json` fails the run, and a version with a hyphen (`v0.2.0-beta.1`) is published under the `next` dist-tag instead of `latest`.
+3. To rehearse, run the workflow by hand from the Actions tab and leave *dry run* on. It needs no npm credentials and publishes nothing.
+
+Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers), so no npm token is stored in this repository. The package settings on npmjs.com list the trusted publisher: organization `goravel`, repository `vite-plugin`, workflow filename `publish.yml`, environment left blank (the field is optional; set it only if the job declares the same `environment`, which this one does not), allowed actions `npm publish` and `npm dist-tag`. Three things about that entry: the package has to exist on npm before it can be added, a newly added entry expires if its first publish does not succeed within two days, and an entry cannot be edited later — it has to be deleted and re-created.
+
+The first release is the exception. npm will not trust a workflow for a package that is not published yet, so `0.1.0` goes out by hand from a maintainer machine (`pnpm install && pnpm publish`, which runs the same build and tests) and the workflow takes over from the next tag. After trusted publishing works, set the package's **Publishing access** to require two-factor authentication and disallow tokens.
 
 ## Contributing
 
