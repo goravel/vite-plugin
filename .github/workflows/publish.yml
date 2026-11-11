@@ -69,14 +69,21 @@ jobs:
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "DIST_TAG=$tag" >> "$GITHUB_ENV"
 
-      # prepublishOnly runs `npm run test`: tsc build (also type-checks) + node --test.
+      # Its own step: tsc has to leave dist/ behind before either path packs, and
+      # staging with --ignore-scripts then skips prepublishOnly.
+      - name: Build and test
+        run: npm test
+
+      # --ignore-scripts because a lifecycle script inherits stdout, so its log
+      # would land in stage.json ahead of npm's JSON and break the parse; `npm test`
+      # above has already built and tested this commit.
       # Staging skips the 2FA prompt and leaves the approval to a maintainer, so
       # OIDC alone is enough here. --json is the only way to learn the stage id in
       # CI: `npm stage list` needs interactive auth and cannot use an OIDC token.
       - name: Stage the release
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
         run: |
-          npm stage publish --tag "$DIST_TAG" --json > stage.json || { cat stage.json; exit 1; }
+          npm stage publish --tag "$DIST_TAG" --json --ignore-scripts > stage.json || { cat stage.json; exit 1; }
           cat stage.json
           stage_id=$(node -p "Object.values(require('./stage.json'))[0].stageId || ''" || echo '')
           if [ -z "$stage_id" ]; then
@@ -95,8 +102,8 @@ jobs:
             echo "To rebuild instead: \`npm stage reject $stage_id\`, fix, and push the tag again."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # No credentials and no upload: dry-run only packs. It needs no token,
-      # and it still runs prepublishOnly, so build and tests are exercised.
+      # No credentials and no upload: dry-run only packs. It needs no token, and
+      # dist/ is already built, so --ignore-scripts only keeps the output readable.
       - name: Stage the release (dry run)
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
-        run: npm stage publish --dry-run --tag "$DIST_TAG"
+        run: npm stage publish --dry-run --tag "$DIST_TAG" --ignore-scripts
