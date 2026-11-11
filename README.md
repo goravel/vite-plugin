@@ -182,10 +182,15 @@ The tests run a real Vite build and dev server in a temporary directory. Node st
 ### Releasing
 
 1. Bump `version` in `package.json` and move the `Unreleased` entries in [CHANGELOG.md](CHANGELOG.md) under the new version.
-2. Commit, tag `vX.Y.Z` and push the tag. The [`publish`](.github/workflows/publish.yml) workflow builds, tests and publishes; a hyphenated version (`v0.2.0-beta.1`) goes to the `next` dist-tag instead of `latest`.
-3. To rehearse, run the workflow by hand and leave *dry run* on: it needs no credentials and publishes nothing.
+2. Commit, tag `vX.Y.Z` and push the tag. The [`publish`](.github/workflows/publish.yml) workflow builds, tests and stages the release with `npm stage publish`; a hyphenated version (`v0.2.0-beta.1`) stages to the `next` dist-tag instead of `latest`.
+3. Approve the staged release with 2FA. The job summary carries the command:
+   ```bash
+   npm stage approve <stage-id>
+   ```
+   You can also approve on npmjs.com under *Staged Packages*. Nothing is installable before that. A version can be staged only once — to rebuild, `npm stage reject <stage-id>`, fix, and push the tag again.
+4. To rehearse, run the workflow by hand and leave *dry run* on: it needs no credentials and stages nothing.
 
-Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers), so no npm token is stored here. The trusted publisher on npmjs.com (organization `goravel`, repository `vite-plugin`, workflow `publish.yml`, no environment) can only be added once the package exists, so `0.1.0` goes out by hand and the workflow takes over from the next tag.
+Staging uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers) and [staged publishing](https://docs.npmjs.com/staged-publishing), so no npm token is stored here. The trusted publisher on npmjs.com is organization `goravel`, repository `vite-plugin`, workflow `publish.yml`, no environment, and it is stage-only: it allows `npm stage publish`, while `npm publish` and `npm dist-tag` are deliberately left disallowed — that is npm's maximum-security posture, and a dist-tag grant could repoint `latest` without any staged approval. `0.1.0` went out by hand before the workflow existed.
 
 ## Contributing
 
