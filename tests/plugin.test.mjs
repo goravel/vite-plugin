@@ -1230,3 +1230,144 @@ test('the hot file carries the alias table', async () => {
 
     assert.equal(fs.existsSync(hotFile), false)
 })
+
+const paths = { public_directory: 'public', build_directory: 'build', hot_file: 'public/hot', manifest: '.vite/manifest.json' }
+const blog = { name: 'blog', path: 'modules/blog', entries: ['modules/blog/resources/js/app.js'], aliases: {} }
+const aliasOf = (config, name) => config.resolve.alias.find(({ find }) => find === name)?.replacement
+
+test('module entries are built and each module with scripts gets an alias', async () => {
+    const root = project({ ...blogFiles, 'modules/shop/module.go': 'package shop\n' })
+    const shop = { name: 'shop', path: 'modules/shop', entries: [], aliases: {} }
+    const discoverCommand = fakeArtisan(root, { inputs: ['@blog/app.js', 'resources/js/app.js'], assets: [], dynamic: [], paths, modules: [blog, shop] })
+
+    const config = await resolve(root, goravel({ discoverCommand }))
+
+    // The entry the view names through the alias and the one the module lists are one input.
+    assert.deepEqual(inputOf(config), ['modules/blog/resources/js/app.js', 'resources/js/app.js'])
+    assert.equal(aliasOf(config, '@blog'), '/modules/blog/resources/js')
+    assert.equal(aliasOf(config, '@'), '/resources/js')
+    // No resources/js, no alias.
+    assert.equal(aliasOf(config, '@shop'), undefined)
+
+    // The dev server gets the aliases too, and builds nothing.
+    const served = await resolve(root, goravel({ discoverCommand }), {}, 'serve')
+    assert.equal(aliasOf(served, '@blog'), '/modules/blog/resources/js')
+    assert.deepEqual(inputOf(served), [])
+
+    // An entry no view references is built all the same.
+    const unreferenced = await resolve(root, goravel({ discovered: { inputs: [], assets: [], modules: [blog] } }))
+    assert.deepEqual(inputOf(unreferenced), ['modules/blog/resources/js/app.js'])
+})
+
+test("a user's alias wins over a module's, in either form", async () => {
+    const root = project({ ...blogFiles, 'resources/blog/app.js': '' })
+    const plugins = () => goravel({ discovered: { inputs: [], assets: [], modules: [{ ...blog, aliases: { '@blog-assets': 'modules/blog/resources/assets' } }] } })
+
+    const object = await resolve(root, plugins(), { resolve: { alias: { '@blog': '/resources/blog', '@blog-assets': '/resources/blog' } } })
+    assert.deepEqual(
+        object.resolve.alias.filter(({ find }) => find === '@blog' || find === '@blog-assets').map(({ replacement }) => replacement),
+        ['/resources/blog', '/resources/blog'],
+    )
+
+    const list = await resolve(root, plugins(), { resolve: { alias: [{ find: '@blog', replacement: '/resources/blog' }] } })
+    assert.equal(aliasOf(list, '@blog'), '/resources/blog')
+    assert.equal(aliasOf(list, '@blog-assets'), '/modules/blog/resources/assets')
+})
+
+test('aliases a module declares work in imports and in templates', async () => {
+    const root = project({
+        ...blogFiles,
+        'modules/blog/resources/js/app.js': "import logo from '@blog-assets/logo.svg'\nimport '@blog/../css/app.css'\nexport default logo\n",
+    })
+    const modules = [{ ...blog, aliases: { '@blog-assets': 'modules/blog/resources/assets' } }]
+
+    await build({
+        configFile: false,
+        logLevel: 'silent',
+        root,
+        plugins: goravel({ discovered: { inputs: ['@blog/app.js'], assets: ['@blog-assets/logo.svg'], modules } }),
+    })
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, 'public/build/.vite/manifest.json'), 'utf8'))
+    assert.deepEqual(manifest['goravel:aliases'], {
+        '@': 'resources/js',
+        '@blog': 'modules/blog/resources/js',
+        '@blog-assets': 'modules/blog/resources/assets',
+    })
+    assert.ok(manifest['modules/blog/resources/js/app.js'].isEntry)
+    assert.equal(manifest['modules/blog/resources/js/app.js'].css.length, 1)
+    assert.match(manifest['modules/blog/resources/assets/logo.svg'].file, /^assets\/logo-[\w-]+\.svg$/)
+
+    // Its own @<name> replaces the one the plugin would add.
+    const own = await resolve(root, goravel({ discovered: { inputs: ['@blog/js/app.js'], assets: [], modules: [{ ...blog, entries: [], aliases: { '@blog': 'modules/blog/resources' } }] } }))
+    assert.equal(aliasOf(own, '@blog'), '/modules/blog/resources')
+    assert.deepEqual(inputOf(own), ['modules/blog/resources/js/app.js'])
+})
+
+test('refresh: true also watches the module directories that exist', async () => {
+    const root = project({
+        ...blogFiles,
+        'resources/views/home.tmpl': '',
+        'modules/blog/resources/views/index.tmpl': '',
+        'modules/blog/lang/en/messages.json': '{}',
+    })
+    const found = { inputs: ['resources/js/app.js'], assets: [], modules: [blog] }
+
+    // The paths are added once the application has been asked, which is before full-reload reads them.
+    const plugins = goravel({ refresh: true, discovered: found })
+    assert.deepEqual(refreshedPaths(plugins), ['resources/views/**'])
+    await resolve(root, plugins, {}, 'serve')
+    assert.deepEqual(refreshedPaths(plugins), ['resources/views/**', 'modules/blog/resources/views/**', 'modules/blog/lang/**'])
+    // A restart resolves the configuration again, with the same plugins.
+    await resolve(root, plugins, {}, 'serve')
+    assert.equal(refreshedPaths(plugins).length, 3)
+
+    const explicit = goravel({ refresh: ['app/**'], discovered: found })
+    await resolve(root, explicit, {}, 'serve')
+    assert.deepEqual(refreshedPaths(explicit), ['app/**'])
+
+    // The reload plugin still takes its paths when the server starts; an upgrade that copies them earlier fails here.
+    const watched = []
+    const spy = {
+        name: 'spy',
+        configureServer({ watcher }) {
+            const add = watcher.add.bind(watcher)
+            watcher.add = (files) => {
+                watched.push(...[files].flat())
+
+                return add(files)
+            }
+        },
+    }
+    const server = await createServer({
+        configFile: false,
+        logLevel: 'silent',
+        root,
+        server: { host: '127.0.0.1', port: 0 },
+        plugins: [spy, goravel({ refresh: true, discovered: found })],
+    })
+    await server.close()
+    assert.ok(watched.includes(path.join(root, 'modules/blog/resources/views/**').split(path.sep).join('/')), watched.join(', '))
+})
+
+test('modules are optional, and malformed ones are refused', async () => {
+    const { validateInputs } = await import('../dist/discover.js')
+
+    // A framework that reports no modules.
+    assert.equal('modules' in validateInputs({ inputs: [], assets: [] }), false)
+    assert.deepEqual(validateInputs({ inputs: [], assets: [], modules: [blog] }).modules, [blog])
+    assert.deepEqual(validateInputs({ inputs: [], assets: [], modules: [{ name: 'api', path: 'modules/api', entries: [] }] }).modules.length, 1)
+
+    for (const modules of [
+        {},
+        [null],
+        [{ name: 'blog', entries: [] }],
+        [{ name: '', path: 'modules/blog', entries: [] }],
+        [{ name: 'blog', path: 'modules/blog' }],
+        [{ name: 'blog', path: 'modules/blog', entries: [1] }],
+        [{ name: 'blog', path: 'modules/blog', entries: [], aliases: ['@x'] }],
+        [{ name: 'blog', path: 'modules/blog', entries: [], aliases: { '@x': 1 } }],
+    ]) {
+        assert.throws(() => validateInputs({ inputs: [], assets: [], modules }), /discovered inputs must look like/, JSON.stringify(modules))
+    }
+})

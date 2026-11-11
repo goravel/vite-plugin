@@ -7,6 +7,7 @@ import fullReload from 'vite-plugin-full-reload'
 import { aliasesKey, collectAliases, resolveEntry } from './aliases.js'
 import {
     defaultManifest,
+    moduleRefreshPaths,
     refreshPaths,
     resolvePaths,
     resolvePluginConfig,
@@ -17,7 +18,7 @@ import {
     type ResolvedPaths,
     type ResolvedPluginConfig,
 } from './config.js'
-import { discoverInputs, type DiscoveredInputs } from './discover.js'
+import { discoverInputs, type DiscoveredInputs, type DiscoveredModule } from './discover.js'
 import {
     configuredOrigin,
     devServerIndex,
@@ -30,7 +31,7 @@ import {
 } from './server.js'
 
 export type { DevServerUrl, InputOption, PluginConfig, RefreshConfig, ResolvedPaths, ResolvedPluginConfig } from './config.js'
-export type { DiscoveredInputs, DiscoveredPaths } from './discover.js'
+export type { DiscoveredInputs, DiscoveredModule, DiscoveredPaths } from './discover.js'
 export { collectAliases, resolveAlias, resolveEntry } from './aliases.js'
 
 interface GoravelPlugin extends Plugin {
@@ -126,10 +127,6 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
     // The @ aliases that point inside the project, handed to the application through the manifest and the hot file.
     let aliases: Record<string, string> = {}
 
-    const defaultAliases: Record<string, string> = {
-        '@': '/resources/js',
-    }
-
     // The URL the browser reaches the dev server at, known once it listens (or from
     // server.origin); undefined where there is no server of its own to listen.
     let devServerUrl: Promise<DevServerUrl | undefined>
@@ -171,7 +168,12 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
                     { timestamp: true },
                 )
             }
+            const modules = discovered?.modules ?? []
+            // full-reload reads its paths when the server starts, after this hook; explicit refresh values are left alone.
+            const refreshed = pluginConfig.defaultRefresh?.paths
+            refreshed?.push(...moduleRefreshPaths(root, modules).filter((pattern) => !refreshed.includes(pattern)))
             // The user's aliases come first, so theirs wins over the plugin's of the same name.
+            const defaultAliases = pluginAliases(root, modules)
             const alias = Array.isArray(userConfig.resolve?.alias)
                 ? [...userConfig.resolve.alias, ...Object.entries(defaultAliases).map(([find, replacement]) => ({ find, replacement }))]
                 : { ...defaultAliases, ...userConfig.resolve?.alias }
@@ -407,7 +409,9 @@ function resolveBuildInput(
         )
     }
 
-    const input = mergeInput(pluginConfig.input, [...new Set(discovered.inputs.map((entry) => resolveEntry(entry, aliases)))])
+    // Module entries are built whether or not a view references them.
+    const entries = [...discovered.inputs, ...(discovered.modules ?? []).flatMap((module) => module.entries)]
+    const input = mergeInput(pluginConfig.input, [...new Set(entries.map((entry) => resolveEntry(entry, aliases)))])
 
     if (!userNamedTheEntries && (Array.isArray(input) ? input.length === 0 : typeof input === 'object' && Object.keys(input).length === 0)) {
         throw new Error(
@@ -416,6 +420,28 @@ function resolveBuildInput(
     }
 
     return input
+}
+
+/**
+ * The plugin's aliases: `@` for the application, `@<name>` for each module with a
+ * `resources/js` directory, then those the modules declare, which may replace their own `@<name>`.
+ */
+function pluginAliases(root: string, modules: DiscoveredModule[]): Record<string, string> {
+    const aliases: Record<string, string> = { '@': '/resources/js' }
+
+    for (const module of modules) {
+        if (fs.existsSync(path.join(root, module.path, 'resources/js'))) {
+            aliases[`@${module.name}`] = path.posix.join('/', module.path, 'resources/js')
+        }
+    }
+
+    for (const module of modules) {
+        for (const [name, directory] of Object.entries(module.aliases ?? {})) {
+            aliases[name] = path.posix.join('/', directory)
+        }
+    }
+
+    return aliases
 }
 
 function runDiscovery(pluginConfig: ResolvedPluginConfig, root: string): DiscoveredInputs {

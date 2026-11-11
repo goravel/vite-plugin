@@ -107,6 +107,23 @@ Both commands run it. A build merges the inputs with `input` and `assets` and bu
 
 What it cannot see is a computed argument such as `{{ vite .entry }}`. Those calls are reported under `dynamic`, the plugin warns about them, and you add the entry to `input` yourself.
 
+### Modules
+
+An application built from modules (`foundation.Setup().WithModules(...)`) reports them too:
+
+```json
+"modules":[{"name":"blog","path":"modules/blog","entries":["modules/blog/resources/js/app.js"],"aliases":{"@blog-assets":"modules/blog/resources/assets"}}]
+```
+
+For each module the plugin:
+
+- builds its `entries` (the module's `ViteEntries()`), whether or not a view references them;
+- aliases `@<name>` to `<path>/resources/js` when that directory exists, so `import x from '@blog/x.js'` and `{{ vite "@blog/app.js" }}` work;
+- adds the aliases the module declares (`ViteAliases()`); a module's own `@<name>` replaces the one above;
+- with `refresh: true`, watches `<path>/resources/views`, `<path>/routes` and `<path>/lang` where they exist. Any other `refresh` value is watched as given.
+
+An alias of the same name in your `resolve.alias` wins over a module's. The `discovered` option carries `modules` like the rest, and output without the key, from a framework that has no modules, works as before.
+
 ### Building without Go
 
 Where the build runs without a Go toolchain, for example a Node-only Docker stage, save the command's output and hand it over:
