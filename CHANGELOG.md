@@ -12,3 +12,4 @@ Initial release.
 - `refresh` reloads the page when views, language files or routes change, through vite-plugin-full-reload.
 - `assets` builds and versions files nothing imports, such as the images `viteAsset` refers to.
 - `@` resolves to `resources/js`.
+- Aliases in templates: `{{ vite "@/app.js" }}` and `{{ viteAsset "@/../images/logo.svg" }}`. The `@` aliases that point inside the project are written to the manifest under `"goravel:aliases"` and to the hot file, which is now one line of JSON, `{"url": "...", "aliases": {...}}`, instead of the bare URL. Discovered entries are resolved through the same table and cleaned, so an entry written two ways is built once; an unknown alias or a path outside the project fails the build.

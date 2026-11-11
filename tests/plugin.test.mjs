@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, test } from 'node:test'
 import { build, createServer, resolveConfig } from 'vite'
-import goravel, { refreshPaths } from '../dist/index.js'
+import goravel, { collectAliases, refreshPaths, resolveAlias, resolveEntry } from '../dist/index.js'
 import { configuredOrigin, resolveDevServerUrl } from '../dist/server.js'
 
 const appInput = ['resources/css/app.css', 'resources/js/app.js']
@@ -63,6 +63,11 @@ function write(root, files) {
         fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true })
         fs.writeFileSync(path.join(root, file), content)
     }
+}
+
+/** The dev server URL in the hot file, which is one line of JSON. */
+function hotUrl(file) {
+    return JSON.parse(fs.readFileSync(file, 'utf8')).url
 }
 
 function resolve(root, plugins, inlineConfig = {}, command = 'build') {
@@ -303,7 +308,7 @@ test('the dev server announces itself in the hot file', async () => {
         const hotFile = path.join(root, 'public', 'hot')
 
         assert.ok(fs.existsSync(hotFile))
-        assert.equal(fs.readFileSync(hotFile, 'utf8'), `http://127.0.0.1:${port}`)
+        assert.equal(hotUrl(hotFile), `http://127.0.0.1:${port}`)
 
         // Served code refers to the dev server, not the placeholder origin Vite was configured with.
         const result = await server.transformRequest('/resources/images/logo.svg?import')
@@ -503,7 +508,7 @@ test('a wildcard bind writes localhost to the hot file, and a configured origin 
         await wildcard.listen()
         const { port } = wildcard.httpServer.address()
 
-        assert.equal(fs.readFileSync(path.join(root, 'public', 'hot'), 'utf8'), `http://localhost:${port}`)
+        assert.equal(hotUrl(path.join(root, 'public', 'hot')), `http://localhost:${port}`)
 
         const result = await wildcard.transformRequest('/resources/images/logo.svg?import')
         assert.match(result.code, new RegExp(`http://localhost:${port}/resources/images/logo.svg`))
@@ -515,7 +520,7 @@ test('a wildcard bind writes localhost to the hot file, and a configured origin 
     const origin = await serve({ host: '127.0.0.1', origin: 'http://assets.test:5173/' })
     try {
         await origin.listen()
-        assert.equal(fs.readFileSync(path.join(root, 'public', 'hot'), 'utf8'), 'http://assets.test:5173')
+        assert.equal(hotUrl(path.join(root, 'public', 'hot')), 'http://assets.test:5173')
     } finally {
         await origin.close()
     }
@@ -525,7 +530,7 @@ test('a wildcard bind writes localhost to the hot file, and a configured origin 
     try {
         await refused.listen()
         const { port } = refused.httpServer.address()
-        assert.equal(fs.readFileSync(path.join(root, 'public', 'hot'), 'utf8'), `http://127.0.0.1:${port}`)
+        assert.equal(hotUrl(path.join(root, 'public', 'hot')), `http://127.0.0.1:${port}`)
     } finally {
         await refused.close()
     }
@@ -584,7 +589,7 @@ test('a hot file of your own and transformOnServe', async () => {
         await server.listen()
 
         const { port } = server.httpServer.address()
-        assert.equal(fs.readFileSync(path.join(root, 'storage', 'vite.hot'), 'utf8'), `http://127.0.0.1:${port}`)
+        assert.equal(hotUrl(path.join(root, 'storage', 'vite.hot')), `http://127.0.0.1:${port}`)
 
         const result = await server.transformRequest('/resources/js/greet.js')
         assert.match(result.code, /hi \$\{name\}/)
@@ -691,10 +696,10 @@ test('a closing server leaves a hot file another server has since written', asyn
         await first.listen()
         await second.listen()
         const secondUrl = `http://127.0.0.1:${second.httpServer.address().port}`
-        assert.equal(fs.readFileSync(hotFile, 'utf8'), secondUrl)
+        assert.equal(hotUrl(hotFile), secondUrl)
 
         await first.close()
-        assert.equal(fs.readFileSync(hotFile, 'utf8'), secondUrl, 'the first server does not own the hot file any more')
+        assert.equal(hotUrl(hotFile), secondUrl, 'the first server does not own the hot file any more')
 
         await second.close()
         assert.equal(fs.existsSync(hotFile), false)
@@ -943,7 +948,7 @@ test('paths, discovery and the environment follow the Vite root, not the working
         await server.listen()
 
         const { port } = server.httpServer.address()
-        assert.equal(fs.readFileSync(path.join(root, 'tmp', 'hot'), 'utf8'), `http://127.0.0.1:${port}`)
+        assert.equal(hotUrl(path.join(root, 'tmp', 'hot')), `http://127.0.0.1:${port}`)
         assert.equal(fs.existsSync(path.join(process.cwd(), 'tmp', 'hot')), false)
     } finally {
         await server.close()
@@ -978,7 +983,7 @@ test('the dev server announces itself where the application reads it', async () 
         await server.listen()
 
         const { port } = server.httpServer.address()
-        assert.equal(fs.readFileSync(path.join(root, 'storage', 'vite.hot'), 'utf8'), `http://127.0.0.1:${port}`)
+        assert.equal(hotUrl(path.join(root, 'storage', 'vite.hot')), `http://127.0.0.1:${port}`)
         assert.equal(fs.existsSync(path.join(root, 'public', 'hot')), false)
     } finally {
         await server.close()
@@ -1102,4 +1107,126 @@ test('explains a failing or silent discovery command', async () => {
         () => resolve(root, goravel({ discoverCommand: fakeArtisan(root, { inputs: [], assets: [] }) })),
         /nothing to build/,
     )
+})
+
+const blogFiles = {
+    'modules/blog/resources/js/app.js': "import '../css/app.css'\nexport const blog = true\n",
+    'modules/blog/resources/css/app.css': 'h2 { color: blue; }\n',
+    'modules/blog/resources/assets/logo.svg': '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>',
+}
+
+test('collects the @ aliases that point inside the project', () => {
+    const root = project({ ...blogFiles, 'resources/ui/button.js': '', 'node_modules/pkg/index.js': '' })
+
+    assert.deepEqual(
+        collectAliases(root, [
+            { find: '@ui', replacement: path.join(root, 'resources/ui') },
+            { find: '@', replacement: '/resources/js' },
+            { find: '@blog', replacement: '/modules/blog/resources/js' },
+            // Left out: a second alias of a taken name, a pattern, a package, a missing directory, a file, another kind of name.
+            { find: '@', replacement: '/resources/ui' },
+            { find: /^@re/, replacement: '/resources/js' },
+            { find: '@pkg', replacement: '/node_modules/pkg' },
+            { find: '@gone', replacement: '/resources/gone' },
+            { find: '@file', replacement: '/resources/js/app.js' },
+            { find: '@out', replacement: path.dirname(root) },
+            { find: '@bare', replacement: 'resources/js' },
+            { find: '~', replacement: '/resources/js' },
+        ]),
+        { '@ui': 'resources/ui', '@': 'resources/js', '@blog': 'modules/blog/resources/js' },
+    )
+    assert.deepEqual(collectAliases(root, { '@': '/resources/js', '~': '/resources/js' }), { '@': 'resources/js' })
+    assert.deepEqual(collectAliases(root, undefined), {})
+})
+
+const aliasTable = { '@': 'resources/js', '@blog': 'modules/blog/resources/js' }
+
+test('resolves the longest alias at a path boundary', () => {
+    assert.equal(resolveAlias('@/app.js', aliasTable), 'resources/js/app.js')
+    assert.equal(resolveAlias('@blog/app.js', aliasTable), 'modules/blog/resources/js/app.js')
+    assert.equal(resolveAlias('@blog', aliasTable), 'modules/blog/resources/js')
+    assert.equal(resolveAlias('@blogs/app.js', aliasTable), null)
+    assert.equal(resolveAlias('resources/js/app.js', aliasTable), null)
+})
+
+test('entries are cleaned like the framework cleans them, and refused outside the project', () => {
+    // The same cases as framework/vite/aliases_test.go.
+    const cases = {
+        'a/./b': 'a/b',
+        '/resources/js/app.js': 'resources/js/app.js',
+        '@/app.js': 'resources/js/app.js',
+        '@blog/app.js': 'modules/blog/resources/js/app.js',
+        '/@blog/app.js': 'modules/blog/resources/js/app.js',
+        '@blog': 'modules/blog/resources/js',
+        '@blog/../assets/x.jpg': 'modules/blog/resources/assets/x.jpg',
+        '@/../../x': 'x',
+    }
+    for (const [entry, expected] of Object.entries(cases)) {
+        assert.equal(resolveEntry(entry, aliasTable), expected, entry)
+    }
+
+    for (const entry of ['..', '../x', '@blog/../../../../../.env', '@/../../../x', '//etc/passwd']) {
+        assert.throws(() => resolveEntry(entry, aliasTable), /outside the project/, entry)
+    }
+
+    assert.throws(
+        () => resolveEntry('@x/app.js', aliasTable),
+        { message: 'goravel-vite-plugin: no alias matches "@x/app.js" (from artisan vite:inputs). Known aliases: @, @blog.' },
+    )
+})
+
+test('a discovered @ entry is built as the file it names, once', async () => {
+    const root = project(blogFiles)
+    const alias = { '@blog': '/modules/blog/resources/js' }
+    const found = {
+        inputs: ['@/app.js', '@blog/app.js', 'modules/blog/resources/js/app.js', '/resources/js/./app.js'],
+        assets: ['@blog/../assets/logo.svg'],
+    }
+
+    const config = await resolve(root, goravel({ discovered: found }), { resolve: { alias } })
+    assert.deepEqual(inputOf(config), ['resources/js/app.js', 'modules/blog/resources/js/app.js'])
+
+    await assert.rejects(
+        resolve(root, goravel({ discovered: { inputs: ['@x/app.js'], assets: [] } }), { resolve: { alias } }),
+        /no alias matches "@x\/app.js" \(from artisan vite:inputs\)\. Known aliases: @, @blog\./,
+    )
+    await assert.rejects(resolve(root, goravel({ discovered: { inputs: ['../x.js'], assets: [] } })), /"\.\.\/x\.js" resolves to "\.\.\/x\.js", outside the project/)
+
+    await build({ configFile: false, logLevel: 'silent', root, resolve: { alias }, plugins: goravel({ discovered: found }) })
+
+    // The table joins the manifest for the application, and the chunks are untouched.
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, 'public/build/.vite/manifest.json'), 'utf8'))
+    assert.deepEqual(manifest['goravel:aliases'], { '@': 'resources/js', '@blog': 'modules/blog/resources/js' })
+    assert.ok(manifest['modules/blog/resources/js/app.js'].isEntry)
+    assert.ok(manifest['resources/js/app.js'].isEntry)
+    assert.match(manifest['modules/blog/resources/assets/logo.svg'].file, /^assets\/logo-[\w-]+\.svg$/)
+})
+
+test('the hot file carries the alias table', async () => {
+    const root = project(blogFiles)
+
+    const server = await createServer({
+        configFile: false,
+        logLevel: 'silent',
+        root,
+        resolve: { alias: [{ find: '@blog', replacement: '/modules/blog/resources/js' }] },
+        server: { host: '127.0.0.1', port: 0 },
+        plugins: goravel({ input: appInput, discover: false }),
+    })
+    const hotFile = path.join(root, 'public', 'hot')
+
+    try {
+        await server.listen()
+
+        const content = fs.readFileSync(hotFile, 'utf8')
+        assert.equal(content.includes('\n'), false)
+        assert.deepEqual(JSON.parse(content), {
+            url: `http://127.0.0.1:${server.httpServer.address().port}`,
+            aliases: { '@blog': 'modules/blog/resources/js', '@': 'resources/js' },
+        })
+    } finally {
+        await server.close()
+    }
+
+    assert.equal(fs.existsSync(hotFile), false)
 })

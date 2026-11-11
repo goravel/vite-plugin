@@ -170,6 +170,24 @@ The framework registers three functions for every view once the `Vite` provider 
 | `{{ viteAsset "resources/images/logo.svg" }}` | The URL of a built asset |
 | `{{ viteReactRefresh }}` | The preamble `@vitejs/plugin-react` needs; empty outside the dev server |
 
+### Aliases in templates
+
+An entry or asset may be written through an alias, in templates and in Go (`facades.Vite().Tags`, `Asset`, `Content`):
+
+```html
+{{ vite "@/app.js" }}                        <!-- resources/js/app.js -->
+{{ viteAsset "@/../images/logo.svg" }}       <!-- resources/images/logo.svg -->
+```
+
+The framework resolves them with a table the plugin hands over: every `resolve.alias` whose name is a string starting with `@` and whose replacement is a directory inside the project, the plugin's own `@` and yours alike. Patterns, packages in `node_modules` and directories outside the project are left out. The table is written where the framework already reads:
+
+- a build adds it to the manifest under the reserved key `"goravel:aliases"`: `{"@": "resources/js"}`;
+- the dev server writes it to the hot file, which is one line of JSON: `{"url":"http://localhost:5173","aliases":{"@":"resources/js"}}`.
+
+After the alias is replaced the path is cleaned (`a/./b`, `a/../b`) on both sides, so a build and the dev server name the same file, and a path that leaves the project is refused. An `@` entry reported by `vite:inputs` that no alias matches fails the build.
+
+`collectAliases`, `resolveAlias` and `resolveEntry` are exported for tools that build the `discovered` option themselves.
+
 ## Development
 
 ```bash
