@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import type { Config as FullReloadConfig } from 'vite-plugin-full-reload'
-import { defaultDiscoverCommand, defaultDiscoverTimeout, validateInputs, type DiscoveredInputs } from './discover.js'
+import { defaultDiscoverCommand, defaultDiscoverTimeout, validateInputs, type DiscoveredInputs, type DiscoveredModule } from './discover.js'
 
 /** The framework's default manifest path, used when the application reports none. */
 export const defaultManifest = '.vite/manifest.json'
@@ -100,6 +100,8 @@ export interface ResolvedPluginConfig {
     buildDirectory: string | undefined
     hotFile: string | undefined
     refresh: boolean | string | string[] | RefreshConfig | RefreshConfig[]
+    /** The configuration `refresh: true` became, which the modules' directories are added to; null for any other value. */
+    defaultRefresh: RefreshConfig | null
     assets: string[]
     transformOnServe: (code: string, url: DevServerUrl) => string
 }
@@ -120,6 +122,18 @@ export const refreshPaths: readonly string[] = ['lang/**', 'resources/lang/**', 
 /** Those of `refreshPaths` that exist under the given directory. */
 export function existingRefreshPaths(cwd: string): string[] {
     return refreshPaths.filter((pattern) => existsSync(path.resolve(cwd, pattern.replace(/\*\*$/, ''))))
+}
+
+/** What `refresh: true` watches inside a module: views, routes and language files. */
+const moduleRefreshDirectories: readonly string[] = ['resources/views', 'routes', 'lang']
+
+/** The globs of the modules' view, route and language directories that exist. */
+export function moduleRefreshPaths(cwd: string, modules: DiscoveredModule[]): string[] {
+    return modules.flatMap((module) =>
+        moduleRefreshDirectories
+            .filter((directory) => existsSync(path.resolve(cwd, module.path, directory)))
+            .map((directory) => path.posix.join(module.path, directory, '**')),
+    )
 }
 
 /** @param cwd - The working directory, which the refresh paths are relative to; the other paths wait for Vite's root. */
@@ -146,6 +160,7 @@ export function resolvePluginConfig(config: string | string[] | PluginConfig | u
     }
 
     const discoverTimeout = config.discoverTimeout ?? defaultDiscoverTimeout
+    const defaultRefresh = config.refresh === true ? { paths: existingRefreshPaths(cwd) } : null
 
     if (!Number.isFinite(discoverTimeout) || discoverTimeout <= 0) {
         throw new Error('goravel-vite-plugin: discoverTimeout must be a number of milliseconds greater than zero.')
@@ -160,7 +175,8 @@ export function resolvePluginConfig(config: string | string[] | PluginConfig | u
         publicDirectory: subdirectory(config.publicDirectory, 'publicDirectory'),
         buildDirectory: subdirectory(config.buildDirectory, 'buildDirectory'),
         hotFile: config.hotFile,
-        refresh: config.refresh === true ? [{ paths: existingRefreshPaths(cwd) }] : (config.refresh ?? false),
+        refresh: defaultRefresh ? [defaultRefresh] : (config.refresh ?? false),
+        defaultRefresh,
         assets: typeof config.assets === 'string' ? [config.assets] : (config.assets ?? []),
         transformOnServe: config.transformOnServe ?? ((code) => code),
     }

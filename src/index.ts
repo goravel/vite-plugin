@@ -4,8 +4,10 @@ import colors from 'picocolors'
 import { globSync } from 'tinyglobby'
 import { createLogger, loadEnv, version as viteVersion, type ConfigEnv, type Plugin, type ResolvedConfig, type UserConfig } from 'vite'
 import fullReload from 'vite-plugin-full-reload'
+import { aliasesKey, collectAliases, resolveEntry } from './aliases.js'
 import {
     defaultManifest,
+    moduleRefreshPaths,
     refreshPaths,
     resolvePaths,
     resolvePluginConfig,
@@ -16,7 +18,7 @@ import {
     type ResolvedPaths,
     type ResolvedPluginConfig,
 } from './config.js'
-import { discoverInputs, type DiscoveredInputs } from './discover.js'
+import { discoverInputs, type DiscoveredInputs, type DiscoveredModule } from './discover.js'
 import {
     configuredOrigin,
     devServerIndex,
@@ -29,7 +31,8 @@ import {
 } from './server.js'
 
 export type { DevServerUrl, InputOption, PluginConfig, RefreshConfig, ResolvedPaths, ResolvedPluginConfig } from './config.js'
-export type { DiscoveredInputs, DiscoveredPaths } from './discover.js'
+export type { DiscoveredInputs, DiscoveredModule, DiscoveredPaths } from './discover.js'
+export { collectAliases, resolveAlias, resolveEntry } from './aliases.js'
 
 interface GoravelPlugin extends Plugin {
     config: (config: UserConfig, env: ConfigEnv) => UserConfig
@@ -121,10 +124,8 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
     let resolvedConfig: ResolvedConfig
     let userConfig: UserConfig
     let paths: ResolvedPaths
-
-    const defaultAliases: Record<string, string> = {
-        '@': '/resources/js',
-    }
+    // The @ aliases that point inside the project, handed to the application through the manifest and the hot file.
+    let aliases: Record<string, string> = {}
 
     // The URL the browser reaches the dev server at, known once it listens (or from
     // server.origin); undefined where there is no server of its own to listen.
@@ -167,9 +168,19 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
                     { timestamp: true },
                 )
             }
+            const modules = discovered?.modules ?? []
+            // full-reload reads its paths when the server starts, after this hook; explicit refresh values are left alone.
+            const refreshed = pluginConfig.defaultRefresh?.paths
+            refreshed?.push(...moduleRefreshPaths(root, modules).filter((pattern) => !refreshed.includes(pattern)))
+            // The user's aliases come first, so theirs wins over the plugin's of the same name.
+            const defaultAliases = pluginAliases(root, modules)
+            const alias = Array.isArray(userConfig.resolve?.alias)
+                ? [...userConfig.resolve.alias, ...Object.entries(defaultAliases).map(([find, replacement]) => ({ find, replacement }))]
+                : { ...defaultAliases, ...userConfig.resolve?.alias }
+            aliases = collectAliases(root, alias)
             // Absolute, so Rollup (Vite 7) finds the entries under a root that is not the working directory.
             const input = absoluteInput(
-                command === 'build' ? resolveBuildInput(pluginConfig, discovered, assets, userNamedTheEntries) : (pluginConfig.input ?? []),
+                command === 'build' ? resolveBuildInput(pluginConfig, discovered, assets, userNamedTheEntries, aliases) : (pluginConfig.input ?? []),
                 root,
             )
 
@@ -203,20 +214,7 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
                           }
                         : undefined),
                 },
-                resolve: {
-                    alias: Array.isArray(userConfig.resolve?.alias)
-                        ? [
-                              ...(userConfig.resolve?.alias ?? []),
-                              ...Object.keys(defaultAliases).map((alias) => ({
-                                  find: alias,
-                                  replacement: defaultAliases[alias],
-                              })),
-                          ]
-                        : {
-                              ...defaultAliases,
-                              ...userConfig.resolve?.alias,
-                          },
-                },
+                resolve: { alias },
             }
         },
         configResolved(config) {
@@ -261,6 +259,21 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
 
             return pluginConfig.transformOnServe(code.replaceAll(placeholderOrigin, url), url)
         },
+        writeBundle() {
+            const { build, root } = resolvedConfig
+
+            if (build.manifest === false || build.ssr) {
+                return
+            }
+
+            // Vite has written its manifest by now; the alias table joins it under a key no chunk can have.
+            const file = path.resolve(root, build.outDir, build.manifest === true ? defaultManifest : build.manifest)
+
+            if (fs.existsSync(file)) {
+                const manifest = JSON.parse(fs.readFileSync(file, 'utf8'))
+                fs.writeFileSync(file, JSON.stringify({ ...manifest, [aliasesKey]: aliases }, null, 2))
+            }
+        },
         configureServer(server) {
             const appUrl = loadEnv(resolvedConfig.mode, resolvedConfig.envDir, 'APP_URL').APP_URL ?? 'undefined'
 
@@ -285,7 +298,8 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
                 const viteDevServerUrl = origin ?? resolveDevServerUrl(address, server.config)
                 setDevServerUrl(viteDevServerUrl)
 
-                const hotFileContent = `${viteDevServerUrl}${server.config.base.replace(/\/$/, '')}`
+                // One line of JSON: the URL, and the aliases the application resolves in {{ vite "@/app.js" }}.
+                const hotFileContent = JSON.stringify({ url: `${viteDevServerUrl}${server.config.base.replace(/\/$/, '')}`, aliases })
                 claimHotFile(paths.hotFile, hotFileContent, server.config.logger)
 
                 // A closed server no longer serves anything, so its hot file goes with it.
@@ -331,7 +345,6 @@ function resolveGoravelPlugin(pluginConfig: ResolvedPluginConfig, assets: Set<st
     }
 }
 
-/** The build entries: `input` plus the discovered ones. Discovered assets go into the set. */
 /**
  * Warns when Vite writes its manifest under a name the application does not read. The
  * directory is the build directory's concern, warned about where the base is derived.
@@ -368,19 +381,25 @@ function userInputKey(userConfig: UserConfig): 'build.rolldownOptions.input' | '
     return userConfig.build?.rollupOptions?.input !== undefined ? 'build.rollupOptions.input' : undefined
 }
 
-/** @param userNamedTheEntries - The user's own entries are built instead, so having none here is no error. */
+/**
+ * The build entries: `input` plus the discovered ones. Discovered assets go into the set.
+ *
+ * @param userNamedTheEntries - The user's own entries are built instead, so having none here is no error.
+ */
 function resolveBuildInput(
     pluginConfig: ResolvedPluginConfig,
     discovered: DiscoveredInputs | null,
     assets: Set<string>,
     userNamedTheEntries: boolean,
+    aliases: Record<string, string>,
 ): InputOption {
     if (discovered === null) {
         return pluginConfig.input ?? []
     }
 
+    // Views may name an entry through an alias or with "./" and "..": the manifest keys are the plain paths.
     for (const asset of discovered.assets) {
-        assets.add(asset)
+        assets.add(resolveEntry(asset, aliases))
     }
 
     for (const call of discovered.dynamic ?? []) {
@@ -390,7 +409,9 @@ function resolveBuildInput(
         )
     }
 
-    const input = mergeInput(pluginConfig.input, discovered.inputs)
+    // Module entries are built whether or not a view references them.
+    const entries = [...discovered.inputs, ...(discovered.modules ?? []).flatMap((module) => module.entries)]
+    const input = mergeInput(pluginConfig.input, [...new Set(entries.map((entry) => resolveEntry(entry, aliases)))])
 
     if (!userNamedTheEntries && (Array.isArray(input) ? input.length === 0 : typeof input === 'object' && Object.keys(input).length === 0)) {
         throw new Error(
@@ -399,6 +420,28 @@ function resolveBuildInput(
     }
 
     return input
+}
+
+/**
+ * The plugin's aliases: `@` for the application, `@<name>` for each module with a
+ * `resources/js` directory, then those the modules declare, which may replace their own `@<name>`.
+ */
+function pluginAliases(root: string, modules: DiscoveredModule[]): Record<string, string> {
+    const aliases: Record<string, string> = { '@': '/resources/js' }
+
+    for (const module of modules) {
+        if (fs.existsSync(path.join(root, module.path, 'resources/js'))) {
+            aliases[`@${module.name}`] = path.posix.join('/', module.path, 'resources/js')
+        }
+    }
+
+    for (const module of modules) {
+        for (const [name, directory] of Object.entries(module.aliases ?? {})) {
+            aliases[name] = path.posix.join('/', directory)
+        }
+    }
+
+    return aliases
 }
 
 function runDiscovery(pluginConfig: ResolvedPluginConfig, root: string): DiscoveredInputs {

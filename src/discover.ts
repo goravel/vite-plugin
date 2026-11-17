@@ -11,6 +11,20 @@ export interface DiscoveredInputs {
     dynamic?: { template: string; function: string }[]
     /** The paths of config/vite.go; absent from a framework that does not report them. */
     paths?: DiscoveredPaths
+    /** The application's modules; absent from a framework that does not report them. */
+    modules?: DiscoveredModule[]
+}
+
+/** A module of the application, every path relative to the project root. */
+export interface DiscoveredModule {
+    /** Aliased as `@<name>` to `<path>/resources/js` when that directory exists. */
+    name: string
+    /** The module directory. */
+    path: string
+    /** Entries to build although no view may reference them. */
+    entries: string[]
+    /** Aliases the module declares, name to directory. */
+    aliases?: Record<string, string>
 }
 
 /** The paths as `config/vite.go` sets them. */
@@ -86,7 +100,7 @@ export function discoverInputs(command: string[], root: string, timeout: number 
 
 /** Checks the shape of the command's output or of the `discovered` option. */
 export function validateInputs(value: unknown): DiscoveredInputs {
-    const { inputs, assets, dynamic, paths } = (value ?? {}) as Partial<DiscoveredInputs>
+    const { inputs, assets, dynamic, paths, modules } = (value ?? {}) as Partial<DiscoveredInputs>
 
     if (
         !isStringList(inputs) ||
@@ -94,10 +108,11 @@ export function validateInputs(value: unknown): DiscoveredInputs {
         (dynamic !== undefined &&
             (!Array.isArray(dynamic) ||
                 dynamic.some((call) => typeof call?.template !== 'string' || typeof call?.function !== 'string'))) ||
-        (paths !== undefined && !isPaths(paths))
+        (paths !== undefined && !isPaths(paths)) ||
+        (modules !== undefined && (!Array.isArray(modules) || !modules.every(isModule)))
     ) {
         throw new Error(
-            'goravel-vite-plugin: discovered inputs must look like { inputs: string[], assets: string[], dynamic?: { template: string, function: string }[], paths?: { public_directory: string, build_directory: string, hot_file: string, manifest: string } }, got ' +
+            'goravel-vite-plugin: discovered inputs must look like { inputs: string[], assets: string[], dynamic?: { template: string, function: string }[], paths?: { public_directory: string, build_directory: string, hot_file: string, manifest: string }, modules?: { name: string, path: string, entries: string[], aliases?: Record<string, string> }[] }, got ' +
                 JSON.stringify(value),
         )
     }
@@ -107,7 +122,27 @@ export function validateInputs(value: unknown): DiscoveredInputs {
         assets,
         ...(dynamic === undefined ? {} : { dynamic }),
         ...(paths === undefined ? {} : { paths }),
+        ...(modules === undefined ? {} : { modules }),
     }
+}
+
+function isModule(value: unknown): value is DiscoveredModule {
+    const module = value as Partial<DiscoveredModule> | null
+
+    return (
+        typeof module === 'object' &&
+        module !== null &&
+        typeof module.name === 'string' &&
+        module.name !== '' &&
+        typeof module.path === 'string' &&
+        module.path !== '' &&
+        isStringList(module.entries) &&
+        (module.aliases === undefined ||
+            (typeof module.aliases === 'object' &&
+                module.aliases !== null &&
+                !Array.isArray(module.aliases) &&
+                Object.values(module.aliases).every((target) => typeof target === 'string')))
+    )
 }
 
 function isPaths(value: unknown): value is DiscoveredPaths {
