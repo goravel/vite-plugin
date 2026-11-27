@@ -117,9 +117,9 @@ An application built from modules (`foundation.Setup().WithModules(...)`) report
 
 For each module the plugin:
 
-- builds its `entries` (the module's `ViteEntries()`), whether or not a view references them;
+- builds its `entries` (the module's `Frontend().Entries`), whether or not a view references them;
 - aliases `@<name>` to `<path>/resources/js` when that directory exists, so `import x from '@blog/x.js'` and `{{ vite "@blog/app.js" }}` work;
-- adds the aliases the module declares (`ViteAliases()`); a module's own `@<name>` replaces the one above;
+- adds the aliases the module declares (`Frontend().Aliases`); a module's own `@<name>` replaces the one above;
 - with `refresh: true`, watches `<path>/resources/views`, `<path>/routes` and `<path>/lang` where they exist. Any other `refresh` value is watched as given.
 
 An alias of the same name in your `resolve.alias` wins over a module's. The `discovered` option carries `modules` like the rest, and output without the key, from a framework that has no modules, works as before.
